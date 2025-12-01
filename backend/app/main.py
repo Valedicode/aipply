@@ -6,8 +6,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI(
-    title="Resume Agent API",
-    description="AI-powered resume optimization with human-in-the-loop feedback",
+    title="AIpply API",
+    description="AI-powered resume and cover-letter optimization with human-in-the-loop feedback",
     version="0.1.0",
 )
 
@@ -25,7 +25,7 @@ app.add_middleware(
 async def root():
     """Health check endpoint"""
     return {
-        "message": "Resume Agent API",
+        "message": "AIpply API",
         "status": "running",
         "version": "0.1.0",
     }

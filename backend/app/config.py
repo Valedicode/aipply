@@ -13,10 +13,10 @@ class Settings(BaseSettings):
     openai_api_key: str
 
     # Database
-    database_url: str = "postgresql://localhost:5432/resume_agent"
+    database_url: str = "postgresql://localhost:5432/aipply"
 
     # Application
-    app_name: str = "Resume Agent"
+    app_name: str = "AIpply"
     debug: bool = False
 
     # CORS

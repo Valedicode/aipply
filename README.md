@@ -1,6 +1,6 @@
-## Resume Agent
+## AIpply
 
-An autonomous **human-in-the-loop AI agent** that takes your **generic PDF resume** and a **specific Job Description URL**, then iteratively rewrites and optimizes your resume until it tightly matches the job requirements and passes your personal approval.
+AIpply is a multi-agent system that takes your generic PDF resume and a specific Job Description URL, then uses a supervisor agent to coordinate specialized analysis agents and a writer agent: the analysis agents deeply understand your resume and the job description, and the writer agent uses that shared understanding to generate a refined, targeted resume and a matching cover letter.
 
 ---
 
@@ -11,34 +11,45 @@ You provide:
 - **Generic resume** as a PDF file
 - **Job Description** as a URL (or pasted text, depending on the interface)
 
-The agent:
+AIpply’s core agents:
 
-- Scrapes and parses the job description
-- Parses your existing resume from PDF
-- Runs a **gap analysis** between JD requirements and your current resume
-- Iteratively **rewrites and optimizes** bullets, summary, and skills
-- **Pauses for your review and feedback** (human-in-the-loop)
-- Incorporates your feedback into the next iteration
-- Outputs a **clean, professional, targeted PDF resume**
+- **Supervisor Agent**:
+  - Orchestrates the full workflow
+  - Delegates analysis tasks and decides when to (re)generate drafts
+  - Ensures consistency between resume and cover letter
+- **Resume Analysis Agent**:
+  - Parses your existing resume from PDF
+  - Extracts your experience, skills, and achievements
+- **Job Description Analysis Agent**:
+  - Scrapes and parses the job description
+  - Identifies required skills, responsibilities, and keywords
+- **Writer Agent**:
+  - Combines the analyses into a **gap analysis** between JD requirements and your current resume
+  - Iteratively **rewrites and optimizes** bullets, summary, and skills
+  - **Pauses for your review and feedback** (human-in-the-loop)
+  - Incorporates your feedback into the next iteration
+  - Outputs a **clean, professional, targeted PDF resume**
+  - Generates a **matching, targeted cover letter** aligned with the same requirements and style
 
 ---
 
 ## Example Workflow
 
 1. Upload your **base resume PDF**.
-2. Provide a **JD URL** (or paste the job description text).
-3. The agent:
+2. Provide a **Job Description URL** (or paste the job description text).
+3. The **Supervisor Agent** coordinates:
    - Scrapes/parses the JD  
    - Parses your resume  
-   - Runs gap analysis and generates a first tailored draft  
+   - Runs gap analysis and, via the Writer Agent, generates a first tailored draft  
 4. Review a **diff view** of proposed changes:
    - Original vs rewritten bullets and sections  
    - Notes on which JD requirements are being satisfied  
 5. Give feedback like:
    - “This looks too formal, make it punchier.”
-6. The agent regenerates the draft with your style preferences.
-7. When satisfied, click **Approve**.
-8. Download your **targeted PDF resume**.
+6. The Writer Agent regenerates the draft with your style preferences.
+7. When satisfied, click **Approve** to finalize your targeted resume.
+8. Optionally, trigger the **Cover Letter Agent** to create a tailored cover letter using the approved resume and JD.
+9. Download your **targeted PDF resume** (and cover letter, if generated).
 
 
 ## Getting Started
@@ -53,15 +64,15 @@ The agent:
 1. **Clone the repo**
 
 ```bash
-git clone https://github.com/Valedicode/resume-agent.git
-cd resume-agent
+git clone https://github.com/Valedicode/aipply.git
+cd aipply
 ```
 
 2. **Create and activate the conda environment**
 
 ```bash
 conda env create -f environment.yml
-conda activate resume-agent
+conda activate aipply
 ```
 
 3. **Install backend Python dependencies**
@@ -89,7 +100,7 @@ Use `backend/env.example` as a reference; at minimum you should set:
 
 ```bash
 cd frontend
-npm install
+pnpm install
 ```
 
 2. **Configure frontend environment variables**

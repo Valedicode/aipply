@@ -1,4 +1,4 @@
-name: resume-agent
+name: aipply
 channels:
   - conda-forge
   - defaults
