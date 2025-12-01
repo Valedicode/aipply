@@ -1,4 +1,4 @@
-## Resume Architect Agent
+## Resume Agent
 
 An autonomous **human-in-the-loop AI agent** that takes your **generic PDF resume** and a **specific Job Description URL**, then iteratively rewrites and optimizes your resume until it tightly matches the job requirements and passes your personal approval.
 
@@ -23,51 +23,6 @@ The agent:
 
 ---
 
-## The Architecture Loop
-
-At the core of this project is an optimization loop with an explicit human checkpoint:
-
-- **Ingestion**
-  - **Job Description scraping**: Fetch and structure the JD from a URL.
-  - **Resume parsing**: Extract sections (summary, experience, projects, skills, education) from your PDF.
-
-- **Gap Analysis**
-  - Compare JD entities (skills, tools, responsibilities, keywords) with your parsed resume.
-  - Identify:
-    - Missing or weak skills/keywords  
-    - Under-emphasized experience  
-    - Misaligned framing or tone
-  - Example: **JD requires `LangGraph`, resume only mentions `Python`**.
-
-- **Drafting**
-  - Rewrite:
-    - Summary / headline
-    - Experience bullets
-    - Skills section
-  - Goals:
-    - Close identified gaps
-    - Mirror relevant JD language (without keyword stuffing)
-    - Preserve factual accuracy and your authentic profile
-
-- **Human Intervention (The Hook)**
-  - Execution pauses and the system:
-    - Shows **before vs after** bullets/sections
-    - Explains which JD requirements each change targets
-  - You can:
-    - Approve / reject individual changes
-    - Give qualitative feedback, e.g.:
-      - “This looks too formal, make it punchier.”
-      - “Shorten this.”
-      - “Tone down the buzzwords.”
-  - The agent ingests your feedback, updates style/constraints, and loops back to **Drafting**.
-
-- **Publication**
-  - Once you click **Approve**:
-    - The agent generates a final, **professionally formatted PDF**
-    - (Optionally) exports other formats (DOCX / Markdown) depending on the implementation
-
----
-
 ## Example Workflow
 
 1. Upload your **base resume PDF**.
@@ -85,12 +40,6 @@ At the core of this project is an optimization loop with an explicit human check
 7. When satisfied, click **Approve**.
 8. Download your **targeted PDF resume**.
 
----
-
-## Project Structure (Planned)
-
-tbc.
----
 
 ## Getting Started
 
@@ -99,59 +48,71 @@ tbc.
 - [Conda](https://docs.conda.io/en/latest/miniconda.html) or [Miniconda](https://docs.conda.io/en/latest/miniconda.html) installed
 - Python 3.12 (recommended) or 3.11+ (managed by conda)
 
-### Setup
+### Backend setup
 
 1. **Clone the repo**
 
 ```bash
-git clone https://github.com/Valedicode/resume-architect-agent.git
-cd resume-architect-agent
+git clone https://github.com/Valedicode/resume-agent.git
+cd resume-agent
 ```
 
-2. **Create and activate conda environment**
+2. **Create and activate the conda environment**
 
 ```bash
 conda env create -f environment.yml
-conda activate resume-architect-agent
+conda activate resume-agent
 ```
 
-3. **Install additional dependencies** (as you add them to your project)
+3. **Install backend Python dependencies**
 
 ```bash
-pip install <package-name>
-# Then update environment.yml or create requirements.txt
+pip install -r backend/requirements.txt
 ```
 
-4. **Configure environment variables**
+4. **Configure backend environment variables**
 
-Create a `.env` file in the project root:
+Create a `.env` file inside the `backend/` directory (next to `requirements.txt`).  
+Use `backend/env.example` as a reference; at minimum you should set:
 
 ```bash
-# .env
-OPENAI_API_KEY=your_api_key_here
-# Add other API keys and configuration as needed
-OUTPUT_DIR=./output
+# backend/.env
+# OPENAI_API_KEY=your_openai_api_key_here
+# ANTHROPIC_API_KEY=your_anthropic_api_key_here
+# GEMINI_API_KEY=your_gemini_api_key_here
+# GROQ_API_KEY=your_groq_api_key_here
 ```
 
-### Alternative: Using venv (if you prefer)
+### Frontend setup
 
-If you'd rather use Python's built-in `venv` instead of conda:
+1. **Install frontend dependencies**
 
 ```bash
-python -m venv .venv
-.venv\Scripts\activate  # On Windows
-# or
-source .venv/bin/activate  # On macOS/Linux
-pip install -r requirements.txt
+cd frontend
+npm install
 ```
+
+2. **Configure frontend environment variables**
+
+Create a `.env.local` file in `frontend/` (based on `frontend/env.example` if present).
+
+### Running the app
+
+In one terminal, start the backend from the project root:
+
+```bash
+cd backend
+uvicorn app.main:app --reload
+```
+
+In another terminal, start the frontend:
+
+```bash
+cd frontend
+pnpm dev
+```
+
+Then open the printed URL (typically `http://localhost:3000`) in your browser.
 
 ---
 
-## Design Principles
-
-- **Human agency first**: You always see what changed and approve the final result.
-- **No fabrication**: The agent reframes and optimizes; it does not invent experience or credentials.
-- **Transparency**: Each change can be traced back to specific JD requirements.
-- **ATS-aware**: Output is optimized for both humans and applicant tracking systems.
-
----
