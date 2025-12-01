@@ -1,4 +1,4 @@
-name: resume-architect-agent
+name: resume-agent
 channels:
   - conda-forge
   - defaults

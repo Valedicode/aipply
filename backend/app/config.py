@@ -13,10 +13,10 @@ class Settings(BaseSettings):
     openai_api_key: str
 
     # Database
-    database_url: str = "postgresql://localhost:5432/resume_architect"
+    database_url: str = "postgresql://localhost:5432/resume_agent"
 
     # Application
-    app_name: str = "Resume Architect Agent"
+    app_name: str = "Resume Agent"
     debug: bool = False
 
     # CORS
@@ -31,4 +31,5 @@ class Settings(BaseSettings):
 def get_settings() -> Settings:
     """Get cached settings instance"""
     return Settings()
+
 
