@@ -17,7 +17,7 @@ export const Header = ({ isDark, toggleTheme }: HeaderProps) => {
               </svg>
             </div>
             <h1 className="text-xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">
-              Resume AI Agent
+              AIpply
             </h1>
           </div>
         </div>
