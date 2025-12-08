@@ -1,3 +1,28 @@
+"""
+CV Agent - Resume Extraction and Analysis
+
+This agent is responsible for extracting structured information from PDF resumes:
+1. Extracts text content from PDF files
+2. Uses LLM to parse and structure resume data
+3. Identifies ambiguities and missing information
+4. Manages clarification loops with users
+5. Updates resume data based on user feedback
+
+Architecture:
+- Uses tool calling pattern (can be invoked by supervisor agent)
+- Structured output with Pydantic models for data consistency
+- Interactive mode for standalone testing
+- Returns JSON strings for easy integration
+
+Tools:
+- extract_resume_info: Main extraction tool (PDF → structured JSON)
+- identify_ambiguities: Quality check tool (finds unclear/missing data)
+- update_resume_with_clarifications: Update tool (incorporates user answers)
+
+Data Model:
+- ResumeInfo: Pydantic model defining resume structure (name, email, phone, skills, education, experience)
+"""
+
 from pydantic import BaseModel, Field
 from langchain.agents import create_agent
 from langchain_core.tools import tool

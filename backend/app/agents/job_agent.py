@@ -1,3 +1,29 @@
+"""
+Job Agent - Job Posting Analysis and Company Research
+
+This agent is responsible for extracting and analyzing job-related information:
+1. Extracts structured job requirements from URLs (web scraping)
+2. Extracts structured job requirements from pasted text
+3. Researches company information using web search
+4. Returns structured data for CV tailoring and cover letter writing
+
+Architecture:
+- Uses tool calling pattern (can be invoked by supervisor agent)
+- Structured output with Pydantic models for data consistency
+- Real web search integration (Tavily) for company research
+- Interactive mode for standalone testing
+- Returns JSON strings for easy integration
+
+Tools:
+- retrieve_web: Extract job info from URLs (WebBaseLoader + LLM extraction)
+- retrieve_text: Extract job info from pasted text (LLM extraction)
+- collect_company_info: Research company using Tavily search (web search + LLM extraction)
+
+Data Models:
+- JobRequirements: Structured job posting data (title, skills, responsibilities, qualifications, etc.)
+- CompanyInfo: Structured company data (values, culture, mission, industry, etc.)
+"""
+
 from pydantic import BaseModel, Field
 from langchain.agents import create_agent
 from langchain_core.tools import tool
@@ -8,9 +34,7 @@ from langchain_tavily import TavilySearch
 
 import dotenv
 
-dotenv.load_dotenv()
-
-# Job Agent is responsible for analyzing the job requirements -> accepts raw text input or web url 
+dotenv.load_dotenv() 
 
 class JobRequirements(BaseModel):
     job_title: str = Field(description="The exact job title or position name")
