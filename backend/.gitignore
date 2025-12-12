@@ -63,4 +63,6 @@ output/
 uploads/
 temp/
 
+# local document
+docs/
 

@@ -39,11 +39,49 @@ from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from pathlib import Path
-from weasyprint import HTML, CSS
 import json
 import dotenv
 
 dotenv.load_dotenv()
+
+# ============================================
+# WeasyPrint Import Helpers (Lazy Loading)
+# ============================================
+
+# Lazy import for WeasyPrint to avoid GTK dependency issues on Windows
+# WeasyPrint will only be imported when PDF generation is actually needed
+_weasyprint_available = None
+
+def _check_weasyprint():
+    """Check if WeasyPrint is available and can be imported."""
+    global _weasyprint_available
+    if _weasyprint_available is None:
+        try:
+            from weasyprint import HTML, CSS
+            _weasyprint_available = True
+        except (ImportError, OSError) as e:
+            _weasyprint_available = False
+            print(f"⚠️  WeasyPrint not available: {e}")
+            print("PDF generation will not work. See installation instructions:")
+            print("https://doc.courtbouillon.org/weasyprint/stable/first_steps.html#windows")
+    return _weasyprint_available
+
+def _import_weasyprint():
+    """Import WeasyPrint with error handling."""
+    try:
+        from weasyprint import HTML, CSS
+        return HTML, CSS
+    except (ImportError, OSError) as e:
+        raise RuntimeError(
+            f"WeasyPrint is not properly installed: {e}\n\n"
+            "On Windows, WeasyPrint requires GTK libraries.\n"
+            "Installation options:\n"
+            "1. Install GTK via MSYS2: https://www.gtk.org/docs/installations/windows/\n"
+            "2. Use WSL (Windows Subsystem for Linux)\n"
+            "3. Use Docker\n"
+            "4. Use an alternative PDF library (reportlab, fpdf)\n\n"
+            "See: https://doc.courtbouillon.org/weasyprint/stable/first_steps.html#windows"
+        ) from e
 
 # ============================================
 # Constants
@@ -435,6 +473,9 @@ def generate_cv_pdf(html_content: str, output_filename: str, applicant_name: str
         "CV PDF generated successfully at: /path/to/backend/data/john_doe_cv.pdf"
     """
     try:
+        # Import WeasyPrint (lazy loading)
+        HTML, CSS = _import_weasyprint()
+        
         # Ensure output directory exists
         output_dir = DEFAULT_OUTPUT_DIR
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -462,6 +503,9 @@ def generate_cv_pdf(html_content: str, output_filename: str, applicant_name: str
         
         return f"CV PDF generated successfully at: {output_path}"
         
+    except RuntimeError as e:
+        # WeasyPrint not available
+        return f"Error: {str(e)}"
     except Exception as e:
         return f"Error generating CV PDF: {str(e)}"
 
@@ -492,6 +536,9 @@ def generate_cover_letter_pdf(content_json: str, output_filename: str, applicant
         ... )
     """
     try:
+        # Import WeasyPrint (lazy loading)
+        HTML, CSS = _import_weasyprint()
+        
         # Parse content
         content = json.loads(content_json)
         
@@ -560,6 +607,9 @@ def generate_cover_letter_pdf(content_json: str, output_filename: str, applicant
         
         return f"Cover letter PDF generated successfully at: {output_path}"
         
+    except RuntimeError as e:
+        # WeasyPrint not available
+        return f"Error: {str(e)}"
     except Exception as e:
         return f"Error generating cover letter PDF: {str(e)}"
 
