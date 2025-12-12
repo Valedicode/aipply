@@ -49,6 +49,8 @@ class SessionManager:
             # Conversation
             "messages": [],
             "conversation_count": 0,
+            "user_input": "",  # Current user message
+            "supervisor_response": "",  # Current supervisor response
             
             # State
             "current_agent": "supervisor",
@@ -104,23 +106,35 @@ class SessionManager:
         
         Args:
             session_id: Session identifier
-            updates: Dictionary of fields to update
+            updates: Dictionary of fields to update (can include new fields)
             
         Returns:
             True if successful, False if session not found
+            
+        Note:
+            This method allows adding new fields to the session, not just updating
+            existing ones. This is necessary because the supervisor agent may return
+            fields that weren't in the initial session template.
         """
         session = self.get_session(session_id)
         if session is None:
             return False
         
-        # Update fields
+        # Update fields (allow adding new fields, not just updating existing ones)
         for key, value in updates.items():
-            if key in session:
-                # Special handling for messages (append instead of replace)
-                if key == "messages" and isinstance(value, list):
+            # Skip internal metadata fields that shouldn't be updated from external sources
+            if key in ["created_at", "last_active"]:
+                continue
+            
+            # Special handling for messages (append instead of replace)
+            if key == "messages" and isinstance(value, list):
+                if key in session:
                     session["messages"].extend(value)
                 else:
-                    session[key] = value
+                    session["messages"] = value
+            else:
+                # Allow updating existing fields or adding new ones
+                session[key] = value
         
         session["last_active"] = datetime.now()
         return True
