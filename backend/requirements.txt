@@ -33,7 +33,7 @@ langchain-tavily>=0.1.0
 httpx>=0.25.0
 
 # PDF generation (for writer agent)
-weasyprint>=60.0
+weasyprint>=67.0
 
 # Optional: LangSmith tracing (for debugging)
 # langsmith>=0.1.0
