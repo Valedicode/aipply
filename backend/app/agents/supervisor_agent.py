@@ -664,13 +664,24 @@ def route_after_intent(state: SupervisorState) -> str:
     if intent == "answer_clarification" and pending_questions:
         return "handle_clarification"
     
+    # Special handling for start_tailoring: check readiness first
+    if intent == "start_tailoring":
+        has_cv = state.get("cv_data") is not None
+        has_job = state.get("job_data") is not None
+        
+        if has_cv and has_job:
+            return "handoff_writer"
+        elif not has_cv:
+            return "handle_missing_data"
+        else:  # not has_job
+            return "handle_missing_data"
+    
     # Route based on intent
     intent_routing = {
         "upload_cv": "invoke_cv",
         "provide_job_url": "invoke_job",
         "provide_job_text": "invoke_job",
         "research_company": "invoke_company_research",
-        "start_tailoring": "check_ready_for_writer",
         "greeting": "generate_response",
         "help": "generate_response",
         "general_question": "generate_response"
@@ -699,19 +710,6 @@ def route_after_action(state: SupervisorState) -> str:
     return routing.get(next_action, END)
 
 
-def check_ready_for_writer(state: SupervisorState) -> str:
-    """
-    Conditional check: Is data ready for Writer hand-off?
-    """
-    has_cv = state.get("cv_data") is not None
-    has_job = state.get("job_data") is not None
-    
-    if has_cv and has_job:
-        return "handoff_writer"
-    elif not has_cv:
-        return "missing_cv"
-    else:
-        return "missing_job"
 
 
 # ============================================
@@ -835,7 +833,8 @@ def create_supervisor_graph():
             "handle_clarification": "handle_clarification",
             "invoke_job": "invoke_job",
             "invoke_company_research": "invoke_company_research",
-            "check_ready_for_writer": "handoff_writer",
+            "handoff_writer": "handoff_writer",
+            "handle_missing_data": "handle_missing_data",
             "continue_writer": "continue_writer",
             "generate_response": "generate_response"
         }
