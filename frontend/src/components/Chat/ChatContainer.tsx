@@ -13,6 +13,7 @@ interface ChatContainerProps {
   onKeyDown: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void;
   onSendMessage: () => void;
   onClickUpload: () => void;
+  sessionReady?: boolean;
 }
 
 export const ChatContainer = ({
@@ -25,6 +26,7 @@ export const ChatContainer = ({
   onKeyDown,
   onSendMessage,
   onClickUpload,
+  sessionReady = true,
 }: ChatContainerProps) => {
   if (messages.length === 0) {
     return (
@@ -76,7 +78,7 @@ export const ChatContainer = ({
       <ChatInput
         textareaRef={textareaRef}
         inputText={inputText}
-        isLoading={isLoading}
+        isLoading={isLoading || !sessionReady}
         onInputChange={onInputChange}
         onKeyDown={onKeyDown}
         onSendMessage={onSendMessage}
