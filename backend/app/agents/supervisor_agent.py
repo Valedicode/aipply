@@ -129,7 +129,7 @@ def analyze_user_intent(state: SupervisorState) -> dict:
     Awaiting Clarification: {pending_questions is not None}
     """
     
-    llm = ChatOpenAI(model="gpt-5-nano", temperature=0)
+    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
     structured_llm = llm.with_structured_output(UserIntent)
     
     prompt = ChatPromptTemplate.from_messages([
@@ -447,18 +447,24 @@ def handoff_to_writer(state: SupervisorState) -> dict:
     job_data = state.get("job_data", "")
     company_data = state.get("company_data", "")
     
+    # Convert data to strings for message construction
+    import json
+    cv_str = json.dumps(cv_data, indent=2) if isinstance(cv_data, dict) else str(cv_data)
+    job_str = json.dumps(job_data, indent=2) if isinstance(job_data, dict) else str(job_data)
+    company_str = json.dumps(company_data, indent=2) if isinstance(company_data, dict) else str(company_data)
+    
     # Prepare initial message for Writer agent
     company_context = ""
     if company_data:
-        company_context = f"\n\nCompany Information:\n{company_data}"
+        company_context = f"\n\nCompany Information:\n{company_str[:300]}... (truncated)"
     
     initial_message = f"""I have CV and job data ready for tailoring.
 
 CV Data:
-{cv_data[:300]}... (truncated)
+{cv_str[:300]}... (truncated)
 
 Job Data:
-{job_data[:300]}... (truncated)
+{job_str[:300]}... (truncated)
 {company_context}
 
 Please analyze the alignment and help me create a tailored CV and cover letter."""
@@ -618,7 +624,7 @@ To get started, just share your CV file with me!"""
 
     else:  # general_question
         # Use LLM for general questions
-        llm = ChatOpenAI(model="gpt-5-nano", temperature=0.7)
+        llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.7)
         
         prompt = ChatPromptTemplate.from_messages([
             ("system", """You are a friendly Job Application Assistant supervisor.

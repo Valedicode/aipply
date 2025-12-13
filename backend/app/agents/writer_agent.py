@@ -271,7 +271,7 @@ def analyze_cv_job_alignment(cv_json: str, job_json: str) -> str:
         >>> plan = analyze_cv_job_alignment(cv_data, job_data)
         >>> # Returns detailed plan with matching experiences, skills, keywords, etc.
     """
-    llm = ChatOpenAI(model="gpt-5-nano", temperature=0)
+    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
     structured_llm = llm.with_structured_output(CVTailoringPlan)
     
     prompt = ChatPromptTemplate.from_messages([
@@ -330,7 +330,7 @@ def generate_tailored_cv_html(cv_json: str, tailoring_plan_json: str) -> str:
         - .entry-left for institution/company names
         - .entry-right for details and descriptions
     """
-    llm = ChatOpenAI(model="gpt-5-nano", temperature=0.3)
+    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.3)
     
     prompt = ChatPromptTemplate.from_messages([
         ("system", """
@@ -618,7 +618,7 @@ def generate_cover_letter_pdf(content_json: str, output_filename: str, applicant
 # ============================================
 
 # Initialize LLM for the agent
-llm = ChatOpenAI(model="gpt-5-nano", temperature=0.2)
+llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.2)
 
 # Comprehensive system prompt defining agent behavior
 system_prompt = """You are a professional CV and cover letter writer specializing in tailoring application materials to specific job opportunities.

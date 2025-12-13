@@ -73,7 +73,7 @@ def retrieve_web(web_urls: list[str]) -> str:
     loader = WebBaseLoader(web_urls)
     docs = loader.load()
     text_content = "\n\n".join([page.page_content for page in docs])
-    llm = ChatOpenAI(model="gpt-5-nano")
+    llm = ChatOpenAI(model="gpt-4o-mini")
     prompt = ChatPromptTemplate.from_messages([
        ("system", "Extract structured job information from the provided job posting. Focus on identifying all required skills, responsibilities, qualifications, and key requirements."),
        ("user", "Here are the pages necessary for application {pages}")
@@ -94,7 +94,7 @@ def retrieve_text(info: str) -> str:
     Returns:
         JSON string with structured job requirements information
     """
-    llm = ChatOpenAI(model="gpt-5-nano")
+    llm = ChatOpenAI(model="gpt-4o-mini")
     prompt = ChatPromptTemplate.from_messages([
        ("system", "Extract structured job information from the provided input text. Focus on identifying all required skills, responsibilities, qualifications, and key requirements."),
        ("user", "Here is the text necessary for application {text}")
@@ -127,7 +127,7 @@ def collect_company_info(company_name: str) -> str:
         for result in search_results
     ])
 
-    llm = ChatOpenAI(model="gpt-5-nano")
+    llm = ChatOpenAI(model="gpt-4o-mini")
     structured_llm = llm.with_structured_output(CompanyInfo)
     prompt = ChatPromptTemplate.from_messages([
         ("system", "Extract structured company information from the search results. Focus on identifying company values, culture, mission statement, industry, company size, products/services, and recent news that would be relevant for someone applying to this company."),
@@ -138,7 +138,7 @@ def collect_company_info(company_name: str) -> str:
     result = chain.invoke({"company_name": company_name, "search_results": formatted_results})
     return result.model_dump_json(indent=2)
 
-llm = ChatOpenAI(model="gpt-5-nano")
+llm = ChatOpenAI(model="gpt-4o-mini")
 system_prompt = """You are a job analysis assistant. Your role is to help users gather comprehensive information about job postings and companies.
 
 Your available tools:

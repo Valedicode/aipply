@@ -46,16 +46,17 @@ class ResumeInfo(BaseModel):
     experience: list[str] = Field(description="Work experience entries")
 
 @tool
-def extract_resume_info(pdf_path: str) -> str:
-    """Extract structured information from a PDF resume file.
+def extract_resume_info(pdf_path: str = "", pdf_bytes: bytes = b"") -> str:
+    """Extract structured information from a PDF resume file or bytes.
         
         This tool:
-        1. Reads the PDF file
+        1. Reads the PDF file or bytes
         2. Extracts text content
         3. Analyzes and structures the information
         
         Args:
-            pdf_path: Path to the PDF resume file (e.g., "resume.pdf")
+            pdf_path: Path to the PDF resume file (e.g., "resume.pdf") - for backward compatibility
+            pdf_bytes: PDF file content as bytes (preferred method)
             
         Returns:
             JSON string with extracted resume information including name, 
@@ -63,13 +64,26 @@ def extract_resume_info(pdf_path: str) -> str:
     """
     # Extract text from PDF
     text = ""
-    path = Path(pdf_path)
-    doc = fitz.open(str(path))
+    
+    # Process from bytes (preferred) or file path (backward compatibility)
+    if pdf_bytes:
+        # Process PDF from memory (more secure, faster)
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    elif pdf_path:
+        # Process PDF from file path (backward compatibility)
+        path = Path(pdf_path)
+        doc = fitz.open(str(path))
+    else:
+        raise ValueError("Either pdf_path or pdf_bytes must be provided")
+    
+    # Extract text from all pages
     for page in doc:
         text += page.get_text("text") + "\n"
     
+    doc.close()  # Always close the document
+    
     # Use LLM to extract structured data
-    llm = ChatOpenAI(model="gpt-5-nano", temperature=0)
+    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
     structured_llm = llm.with_structured_output(ResumeInfo)
 
     prompt = ChatPromptTemplate.from_messages([
@@ -93,7 +107,7 @@ def identify_ambiguities(resume_json: str) -> str:
     Returns:
         List of clarifying questions to ask the user, or "No questions" if data is clear
     """
-    llm = ChatOpenAI(model="gpt-5-nano", temperature=0)
+    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
     prompt = ChatPromptTemplate.from_messages([
         ("system", """Analyze the resume data for:
         - Missing important information
@@ -132,7 +146,7 @@ def update_resume_with_clarifications(resume_json: str, clarifications: str) -> 
     return result.content
 
 # Create agent
-llm = ChatOpenAI(model="gpt-5-nano")
+llm = ChatOpenAI(model="gpt-4o-mini")
 system_prompt = """You are a resume extraction assistant. Your workflow:
 
 1. When given a PDF path, use extract_resume_info to extract information
