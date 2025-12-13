@@ -8,7 +8,6 @@ from fastapi import APIRouter, HTTPException, status, UploadFile, File
 from pathlib import Path
 import json
 import uuid
-import shutil
 from typing import Optional
 
 from app.models.schemas import (
@@ -27,7 +26,7 @@ from app.agents.cv_agent import (
 
 router = APIRouter(prefix="/api/cv", tags=["CV Agent"])
 
-# Configure upload directory
+# Configure upload directory (only used for legacy /extract endpoint)
 UPLOAD_DIR = Path(__file__).parent.parent.parent / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -44,15 +43,14 @@ async def upload_cv(file: UploadFile = File(...)):
     
     **Purpose:**
     This endpoint is designed for frontend file uploads. It accepts a PDF file
-    via multipart/form-data, saves it temporarily, extracts the data, and cleans up.
+    via multipart/form-data, processes it in memory, and extracts the data.
     
     **Workflow:**
     1. Validates file is PDF
-    2. Saves file temporarily with unique ID
+    2. Reads file into memory
     3. Extracts CV information using LLM
     4. Identifies ambiguities or missing information
-    5. Cleans up temporary file
-    6. Returns data and questions (if any)
+    5. Returns data and questions (if any)
     
     **Parameters:**
     - `file`: PDF file upload (multipart/form-data)
@@ -64,6 +62,12 @@ async def upload_cv(file: UploadFile = File(...)):
     
     **File Size Limit:** 10MB
     **Accepted Types:** PDF only
+    
+    **Security & Best Practices:**
+    - Processes PDF in memory (no disk I/O)
+    - No temporary files created
+    - No cleanup required
+    - Faster and more secure than disk-based processing
     """
     try:
         # Validate file type
@@ -80,24 +84,36 @@ async def upload_cv(file: UploadFile = File(...)):
                 detail=f"Invalid content type: {file.content_type}. Expected application/pdf."
             )
         
-        # Generate unique filename
-        file_id = str(uuid.uuid4())
-        temp_filename = f"{file_id}_{file.filename}"
-        temp_path = UPLOAD_DIR / temp_filename
-        
-        # Save uploaded file
+        # Read file into memory
         try:
-            with temp_path.open("wb") as buffer:
-                shutil.copyfileobj(file.file, buffer)
+            pdf_bytes = await file.read()
+            
+            # Validate file size (10MB max)
+            max_size = 10 * 1024 * 1024  # 10MB
+            if len(pdf_bytes) > max_size:
+                raise HTTPException(
+                    status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    detail=f"File size exceeds maximum allowed size of 10MB. File size: {len(pdf_bytes) / (1024*1024):.2f}MB"
+                )
+            
+            # Validate it's actually a PDF (check magic bytes)
+            if not pdf_bytes.startswith(b'%PDF'):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Invalid PDF file. The file does not appear to be a valid PDF document."
+                )
+                
+        except HTTPException:
+            raise
         except Exception as e:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to save uploaded file: {str(e)}"
+                detail=f"Failed to read uploaded file: {str(e)}"
             )
         
+        # Extract CV information from memory
         try:
-            # Extract CV information
-            cv_data_json = extract_resume_info.invoke({"pdf_path": str(temp_path)})
+            cv_data_json = extract_resume_info.invoke({"pdf_bytes": pdf_bytes})
             cv_data_dict = json.loads(cv_data_json)
             
             # Check for ambiguities
@@ -130,26 +146,23 @@ async def upload_cv(file: UploadFile = File(...)):
                     message="CV extracted successfully. All information is clear."
                 )
         
-        finally:
-            # Clean up temporary file
-            try:
-                if temp_path.exists():
-                    temp_path.unlink()
-            except Exception as e:
-                # Log but don't fail the request if cleanup fails
-                print(f"Warning: Failed to delete temporary file {temp_path}: {e}")
+        except json.JSONDecodeError as e:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to parse CV data: {str(e)}"
+            )
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Error processing CV: {str(e)}"
+            )
     
     except HTTPException:
         raise
-    except json.JSONDecodeError as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to parse CV data: {str(e)}"
-        )
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error processing CV: {str(e)}"
+            detail=f"Unexpected error during CV upload: {str(e)}"
         )
 
 
