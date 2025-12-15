@@ -28,6 +28,7 @@ interface UseFileUploadReturn {
   handleClickUpload: () => void;
   handleRemoveFile: () => void;
   retryUpload: () => Promise<void>;
+  processUploadedFile: () => Promise<void>;
 }
 
 export const useFileUpload = ({ sessionId, onCVUploaded }: UseFileUploadProps): UseFileUploadReturn => {
@@ -100,9 +101,9 @@ export const useFileUpload = ({ sessionId, onCVUploaded }: UseFileUploadProps): 
     
     setUploadedFile(file);
     
-    // Automatically upload to backend
-    await uploadFileToBackend(file);
-  }, [uploadFileToBackend]);
+    // Don't automatically upload - wait for manual trigger
+    // await uploadFileToBackend(file);
+  }, []);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -155,6 +156,12 @@ export const useFileUpload = ({ sessionId, onCVUploaded }: UseFileUploadProps): 
     }
   }, [uploadedFile, uploadFileToBackend]);
 
+  const processUploadedFile = useCallback(async () => {
+    if (uploadedFile && !cvData && !isUploading) {
+      await uploadFileToBackend(uploadedFile);
+    }
+  }, [uploadedFile, cvData, isUploading, uploadFileToBackend]);
+
   return {
     uploadedFile,
     cvData,
@@ -171,5 +178,6 @@ export const useFileUpload = ({ sessionId, onCVUploaded }: UseFileUploadProps): 
     handleClickUpload,
     handleRemoveFile,
     retryUpload,
+    processUploadedFile,
   };
 };
