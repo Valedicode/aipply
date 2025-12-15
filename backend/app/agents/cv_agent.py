@@ -88,7 +88,7 @@ def extract_resume_info(pdf_path: str = "", pdf_bytes: bytes = b"") -> str:
 
     prompt = ChatPromptTemplate.from_messages([
         ("system", "Extract all information from the resume text. Be thorough and capture all details."),
-        ("user", f"{text}")
+        ("user", "{text}")
     ])
 
     chain = prompt | structured_llm
