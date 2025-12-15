@@ -13,25 +13,25 @@ const steps: StepData[] = [
     number: 1,
     title: 'Upload your resume PDF',
     description:
-      'Drag and drop your existing resume or click to browse. Our AI will extract your skills, experience, and qualifications. If any information is unclear, we\'ll ask clarifying questions to ensure accuracy.',
+      'Drag and drop your existing resume or click to browse. Our AI analyzes your resume, extracting your skills, experience, and qualifications. If any information is unclear, we\'ll ask clarifying questions through chat to ensure accuracy.',
   },
   {
     number: 2,
-    title: 'Paste job description or URL',
+    title: 'Add job description',
     description:
-      'Share the job posting by pasting the job description text directly or providing a URL. Our AI analyzes the requirements, identifies key skills, and understands what the employer is looking for.',
+      'Paste the job description text directly or provide a URL to the job posting. Our AI analyzes the requirements, identifies key skills, and understands exactly what the employer is looking for to match with your profile.',
   },
   {
     number: 3,
-    title: 'Review AI suggestions',
+    title: 'Chat with AI to fine-tune',
     description:
-      'Our AI compares your resume with the job requirements and provides personalized recommendations. You can chat with the AI to refine the suggestions, ask questions, or request specific changes before generating your tailored resume.',
+      'Our AI supervisor analyzes the gap between your resume and job requirements. Chat with the AI to refine your resume, request specific improvements, or ask for suggestions. The AI can transform your resume to be perfectly tailored to the job description.',
   },
   {
     number: 4,
-    title: 'Download optimized resume',
+    title: 'Generate tailored documents',
     description:
-      'Once you\'re satisfied with the tailored resume, download your professionally formatted PDF. You can also generate a matching cover letter that highlights your relevant experience and aligns with the job requirements.',
+      'Request the AI to generate a tailored resume optimized for the job description, or create a compelling cover letter based on your resume and the job requirements. Download your professionally formatted documents as PDF when ready.',
   },
 ];
 
@@ -51,28 +51,28 @@ export const HowItWorks = () => {
   };
 
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-700 dark:bg-slate-800">
-      <h3 className="mb-6 text-lg font-semibold text-indigo-900 dark:text-indigo-300">
-        How it works
+    <div className="rounded-2xl bg-white p-8 shadow-lg dark:bg-slate-800">
+      <h3 className="mb-8 text-center text-2xl font-semibold text-slate-900 dark:text-slate-100">
+        How It Works
       </h3>
-      <ol className="space-y-4">
+      <ol className="space-y-6">
         {steps.map((step) => {
           const isExpanded = expandedSteps.has(step.number);
           return (
-            <li key={step.number} className="flex gap-4">
-              <span className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-indigo-100 text-base font-semibold text-indigo-700 dark:bg-indigo-900/50 dark:text-indigo-400">
+            <li key={step.number} className="flex gap-5">
+              <span className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-indigo-500 to-indigo-600 text-lg font-semibold text-white shadow-sm dark:from-indigo-400 dark:to-indigo-500">
                 {step.number}
               </span>
-              <div className="flex-1">
+              <div className="flex-1 pt-1">
                 <button
                   onClick={() => toggleStep(step.number)}
-                  className="flex w-full items-center justify-between gap-2 text-left transition-colors hover:text-indigo-600 dark:hover:text-indigo-400"
+                  className="group flex w-full items-start justify-between gap-3 text-left transition-colors"
                 >
-                  <h4 className="font-semibold text-slate-900 dark:text-slate-100">
+                  <h4 className="text-lg font-semibold text-slate-900 transition-colors group-hover:text-indigo-600 dark:text-slate-100 dark:group-hover:text-indigo-400">
                     {step.title}
                   </h4>
                   <svg
-                    className={`h-5 w-5 flex-shrink-0 text-slate-400 transition-transform ${
+                    className={`mt-1 h-5 w-5 flex-shrink-0 text-slate-400 transition-transform ${
                       isExpanded ? 'rotate-180' : ''
                     }`}
                     fill="none"
@@ -88,7 +88,7 @@ export const HowItWorks = () => {
                   </svg>
                 </button>
                 {isExpanded && (
-                  <p className="mt-2 text-sm text-slate-600 dark:text-slate-400">
+                  <p className="mt-3 text-sm leading-relaxed text-slate-600 dark:text-slate-400">
                     {step.description}
                   </p>
                 )}

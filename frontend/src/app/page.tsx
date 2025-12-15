@@ -1,9 +1,10 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import { Header } from '@/components/Header';
-import { ResumeUpload } from '@/components/ResumeUpload';
-import { JobInput } from '@/components/JobInput';
-import { HowItWorks } from '@/components/HowItWorks';
+import { ProgressBreadcrumb } from '@/components/ProgressBreadcrumb';
+import { UploadSection } from '@/components/UploadSection';
+import { AnalysisLoadingScreen } from '@/components/AnalysisLoadingScreen';
 import { ChatContainer } from '@/components/Chat/ChatContainer';
 import { useTheme } from '@/hooks/useTheme';
 import { useFileUpload } from '@/hooks/useFileUpload';
@@ -13,6 +14,11 @@ import { useChat } from '@/hooks/useChat';
 
 export default function Home() {
   const { isDark, toggleTheme } = useTheme();
+  
+  // New state for manual control
+  const [jobSkipped, setJobSkipped] = useState(false);
+  const [analysisStarted, setAnalysisStarted] = useState(false);
+  const [chatReady, setChatReady] = useState(false);
   
   // Initialize session
   const {
@@ -39,6 +45,7 @@ export default function Home() {
     handleFileInputChange,
     handleClickUpload,
     handleRemoveFile,
+    processUploadedFile,
   } = useFileUpload({ 
     sessionId,
     onCVUploaded: () => {
@@ -48,11 +55,16 @@ export default function Home() {
   
   // Job input with backend integration
   const {
+    jobUrl,
+    setJobUrl,
     jobText,
     setJobText,
     jobData,
     isProcessing: isJobProcessing,
     error: jobError,
+    urlValidationError,
+    textValidationError,
+    isValidInput: isValidJobInput,
     submitJob,
     clearError: clearJobError,
     clearJob,
@@ -79,6 +91,57 @@ export default function Home() {
     cvData,
     onSessionStateUpdate: updateSessionState,
   });
+
+  // Handlers for new functionality
+  const handleSkipJob = () => {
+    setJobSkipped(true);
+  };
+
+  const handleUnskipJob = () => {
+    setJobSkipped(false);
+  };
+
+  const handleStartAnalysis = async () => {
+    // Immediately swap UI to loading screen
+    setAnalysisStarted(true);
+    setChatReady(false);
+
+    // Process resume if not already processed
+    if (uploadedFile && !cvData) {
+      await processUploadedFile();
+    }
+
+    // Process job if valid input is provided but not yet processed
+    if (isValidJobInput && !jobData && !jobSkipped) {
+      await submitJob();
+    }
+  };
+
+  // Determine if analysis can be started
+  // Can start if resume is uploaded and either job is skipped or valid job input is provided
+  const canStartAnalysis = !!uploadedFile && !isUploading && (jobSkipped || isValidJobInput);
+  
+  // Determine if both uploads are complete and analysis is done
+  const inputsReady = !!cvData && (jobSkipped || !!jobData);
+  const bothUploadsComplete = analysisStarted && chatReady && inputsReady;
+  const isAnalyzing = isUploading || isJobProcessing;
+  const hasJobInput = isValidJobInput;
+
+  // Small "preparing" phase for smoother UX
+  useEffect(() => {
+    if (!analysisStarted) {
+      setChatReady(false);
+      return;
+    }
+
+    if (!inputsReady) {
+      setChatReady(false);
+      return;
+    }
+
+    const t = setTimeout(() => setChatReady(true), 650);
+    return () => clearTimeout(t);
+  }, [analysisStarted, inputsReady]);
 
   return (
     <div className="flex min-h-screen flex-col bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950">
@@ -127,52 +190,89 @@ export default function Home() {
           </div>
         )}
 
-        <div className="flex flex-1 flex-col gap-6 lg:flex-row">
-          {/* Left Sidebar - Upload Section */}
-          <aside className="flex flex-col gap-4 lg:w-80">
-            <ResumeUpload
-              uploadedFile={uploadedFile}
-              isDragging={isDragging}
-              uploadError={uploadError}
-              isUploading={isUploading}
-              cvData={cvData}
-              needsClarification={needsClarification}
-              clarificationQuestions={clarificationQuestions}
-              fileInputRef={fileInputRef}
-              onDragOver={handleDragOver}
-              onDragLeave={handleDragLeave}
-              onDrop={handleDrop}
-              onFileInputChange={handleFileInputChange}
-              onClickUpload={handleClickUpload}
-              onRemoveFile={handleRemoveFile}
-            />
-            <JobInput
-              jobText={jobText}
-              setJobText={setJobText}
-              jobData={jobData}
-              isProcessing={isJobProcessing}
-              error={jobError}
-              onSubmit={submitJob}
-              onClear={clearJob}
-            />
-            <HowItWorks />
-          </aside>
+        {/* Progress Breadcrumb */}
+        <div className="mb-6">
+          <ProgressBreadcrumb
+            resumeUploaded={!!uploadedFile}
+            jobUploaded={!!jobData}
+            jobSkipped={jobSkipped}
+            jobInputValid={isValidJobInput}
+            analysisStarted={analysisStarted}
+            isAnalyzing={isAnalyzing}
+          />
+        </div>
 
-          {/* Main Chat Area */}
-          <div className="flex flex-1 flex-col gap-4">
-            <ChatContainer
-              messages={messages}
-              inputText={inputText}
-              isLoading={isLoading}
-              textareaRef={textareaRef}
-              messagesEndRef={messagesEndRef}
-              onInputChange={setInputText}
-              onKeyDown={handleKeyDown}
-              onSendMessage={handleSendMessage}
-              onClickUpload={handleClickUpload}
-              sessionReady={!!sessionId && !isInitializing}
-            />
-          </div>
+        {/* Conditional Content: Upload Section or Chat Interface */}
+        <div className="flex flex-1 flex-col">
+          {!analysisStarted ? (
+            <div className="transition-opacity duration-500 ease-in-out">
+              <UploadSection
+                uploadedFile={uploadedFile}
+                isDragging={isDragging}
+                uploadError={uploadError}
+                isUploading={isUploading}
+                cvData={cvData}
+                needsClarification={needsClarification}
+                clarificationQuestions={clarificationQuestions}
+                fileInputRef={fileInputRef}
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
+                onDrop={handleDrop}
+                onFileInputChange={handleFileInputChange}
+                onClickUpload={handleClickUpload}
+                onRemoveFile={handleRemoveFile}
+                jobUrl={jobUrl}
+                setJobUrl={setJobUrl}
+                jobText={jobText}
+                setJobText={setJobText}
+                jobData={jobData}
+                isJobProcessing={isJobProcessing}
+                jobError={jobError}
+                urlValidationError={urlValidationError}
+                textValidationError={textValidationError}
+                onJobClear={clearJob}
+                jobSkipped={jobSkipped}
+                onSkipJob={handleSkipJob}
+                onUnskipJob={handleUnskipJob}
+                onStartAnalysis={handleStartAnalysis}
+                analysisStarted={analysisStarted}
+                canStartAnalysis={canStartAnalysis}
+              />
+            </div>
+          ) : !bothUploadsComplete ? (
+            <div className="flex flex-1 animate-fade-in">
+              <AnalysisLoadingScreen
+                resumeState={cvData ? 'done' : 'active'}
+                jobState={
+                  jobSkipped
+                    ? 'skipped'
+                    : jobData
+                      ? 'done'
+                      : analysisStarted && cvData && isValidJobInput
+                        ? 'active'
+                        : 'pending'
+                }
+                preparingState={
+                  cvData && inputsReady ? (chatReady ? 'done' : 'active') : 'pending'
+                }
+              />
+            </div>
+          ) : (
+            <div className="flex flex-1 animate-fade-in">
+              <ChatContainer
+                messages={messages}
+                inputText={inputText}
+                isLoading={isLoading}
+                textareaRef={textareaRef}
+                messagesEndRef={messagesEndRef}
+                onInputChange={setInputText}
+                onKeyDown={handleKeyDown}
+                onSendMessage={handleSendMessage}
+                onClickUpload={handleClickUpload}
+                sessionReady={!!sessionId && !isInitializing}
+              />
+            </div>
+          )}
         </div>
       </main>
     </div>
