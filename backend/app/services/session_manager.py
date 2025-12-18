@@ -134,6 +134,11 @@ class SessionManager:
                     session["messages"] = value
             else:
                 # Allow updating existing fields or adding new ones
+                # For critical data fields (cv_data, job_data), only update if value is not None
+                # This prevents accidentally clearing data that should persist
+                if key in ["cv_data", "job_data", "company_data"] and value is None and key in session:
+                    # Don't overwrite existing data with None
+                    continue
                 session[key] = value
         
         session["last_active"] = datetime.now()
