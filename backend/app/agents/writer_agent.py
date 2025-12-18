@@ -630,6 +630,9 @@ IMPORTANT CONTEXT:
   * Company info (CompanyInfo JSON, optional) - researched by job_agent
 - Your role is to TRANSFORM this data into tailored, professional documents
 - You DO NOT extract data from raw files - that's already done
+- The complete CV and job data are provided in a system message at the start of our conversation
+- This data persists throughout our entire conversation - always use the FULL JSON data from the system context when calling tools
+- Do NOT use truncated or partial data from earlier messages - always reference the complete data from the system context
 
 YOUR WORKFLOW (FOLLOW THIS SEQUENCE):
 
