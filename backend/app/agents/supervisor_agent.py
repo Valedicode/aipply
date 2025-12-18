@@ -121,12 +121,21 @@ def analyze_user_intent(state: SupervisorState) -> dict:
     has_job = state.get("job_data") is not None
     pending_questions = state.get("pending_questions")
     
+    # Debug: Log what the intent analyzer sees
+    print(f"\n=== Intent Analyzer State ===")
+    print(f"User Input: {user_input[:50]}...")
+    print(f"Session Stage: {session_stage}")
+    print(f"Has CV: {has_cv}")
+    print(f"Has Job: {has_job}")
+    print(f"============================\n")
+    
     # Build context for LLM
     context = f"""
     Session Stage: {session_stage}
     Has CV Data: {has_cv}
     Has Job Data: {has_job}
     Awaiting Clarification: {pending_questions is not None}
+    Ready for Writer: {has_cv and has_job}
     """
     
     llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
@@ -145,6 +154,11 @@ def analyze_user_intent(state: SupervisorState) -> dict:
         - If they paste job description, intent is "provide_job_text"
         - If asking about company, intent is "research_company"
         - If they want to start writing/tailoring, intent is "start_tailoring"
+        
+        IMPORTANT: Check if CV Data and Job Data are already available in the context.
+        - If BOTH are available (Has CV Data: True, Has Job Data: True), and the user is asking about tailoring, analysis, or next steps, classify as "start_tailoring"
+        - If BOTH are available and user asks general questions like "what now" or "help", also classify as "start_tailoring" since they're ready
+        - Only ask for CV/job if they're actually missing
         """),
         ("user", "{user_input}")
     ])
@@ -448,29 +462,68 @@ def handoff_to_writer(state: SupervisorState) -> dict:
     company_data = state.get("company_data", "")
     
     # Convert data to strings for message construction
-    import json
-    cv_str = json.dumps(cv_data, indent=2) if isinstance(cv_data, dict) else str(cv_data)
-    job_str = json.dumps(job_data, indent=2) if isinstance(job_data, dict) else str(job_data)
-    company_str = json.dumps(company_data, indent=2) if isinstance(company_data, dict) else str(company_data)
+    # Handle both dict and JSON string formats
+    def format_data(data):
+        if data is None or data == "":
+            return ""
+        if isinstance(data, dict):
+            try:
+                return json.dumps(data, indent=2)
+            except (TypeError, ValueError) as e:
+                # If serialization fails, return string representation
+                return str(data)
+        if isinstance(data, str):
+            # If it's already a JSON string, try to parse and reformat for consistency
+            if not data.strip():
+                return ""
+            try:
+                parsed = json.loads(data)
+                return json.dumps(parsed, indent=2)
+            except (json.JSONDecodeError, TypeError):
+                # If it's not valid JSON, return as-is
+                return data
+        return str(data)
     
-    # Prepare initial message for Writer agent
+    cv_str = format_data(cv_data)
+    job_str = format_data(job_data)
+    company_str = format_data(company_data)
+    
+    # Validate that we have at least CV or job data before proceeding
+    if not cv_str and not job_str:
+        return {
+            "supervisor_response": "I need both CV and job data to proceed with tailoring. Please provide your CV and job posting first.",
+            "next_action": "wait_for_input",
+            "messages": [{"role": "assistant", "content": "Missing CV or job data for writer handoff"}]
+        }
+    
+    # Prepare system message with FULL CV/job data (not truncated)
+    # This ensures the writer agent always has access to the complete context
     company_context = ""
-    if company_data:
-        company_context = f"\n\nCompany Information:\n{company_str[:300]}... (truncated)"
+    if company_str:
+        company_context = f"\n\nCompany Information:\n{company_str}"
     
-    initial_message = f"""I have CV and job data ready for tailoring.
-
-CV Data:
-{cv_str[:300]}... (truncated)
-
-Job Data:
-{job_str[:300]}... (truncated)
-{company_context}
-
-Please analyze the alignment and help me create a tailored CV and cover letter."""
+    # Build the system context with available data
+    data_sections = []
+    if cv_str:
+        data_sections.append(f"CV Data (ResumeInfo JSON):\n{cv_str}")
+    if job_str:
+        data_sections.append(f"Job Requirements (JobRequirements JSON):\n{job_str}")
     
-    # Initialize Writer agent conversation
-    writer_messages = [{"role": "user", "content": initial_message}]
+    system_context = f"""You have access to the following structured data for this job application:
+
+{chr(10).join(data_sections)}{company_context}
+
+IMPORTANT: This data is available throughout our conversation. When you need to use tools like analyze_cv_job_alignment, generate_tailored_cv_html, or generate_cover_letter_content, use the FULL JSON data provided above, not truncated versions from earlier messages."""
+    
+    initial_message = """I have CV and job data ready for tailoring. Please analyze the alignment and help me create a tailored CV and cover letter.
+
+The complete CV and job data are available in the system context above."""
+    
+    # Initialize Writer agent conversation with system message containing full data
+    writer_messages = [
+        {"role": "system", "content": system_context},
+        {"role": "user", "content": initial_message}
+    ]
     
     try:
         # Lazy import writer_agent to avoid WeasyPrint issues
@@ -544,6 +597,71 @@ Just let me know what you need!"""
         # This should contain the full conversation history from previous turns
         # If missing (edge case), start with empty list
         writer_messages = state.get("writer_messages", [])
+        
+        # Ensure CV/job data is always available in the context
+        # Check if system message with data exists, if not, add it
+        cv_data = state.get("cv_data", "")
+        job_data = state.get("job_data", "")
+        company_data = state.get("company_data", "")
+        
+        # Check if we need to inject the system context with full data
+        has_system_context = any(
+            msg.get("role") == "system" and "CV Data (ResumeInfo JSON)" in msg.get("content", "")
+            for msg in writer_messages
+        )
+        
+        if not has_system_context and (cv_data or job_data):
+            # Reconstruct system message with full data
+            # Handle both dict and JSON string formats
+            def format_data(data):
+                if data is None or data == "":
+                    return ""
+                if isinstance(data, dict):
+                    try:
+                        return json.dumps(data, indent=2)
+                    except (TypeError, ValueError) as e:
+                        # If serialization fails, return string representation
+                        return str(data)
+                if isinstance(data, str):
+                    # If it's already a JSON string, try to parse and reformat for consistency
+                    if not data.strip():
+                        return ""
+                    try:
+                        parsed = json.loads(data)
+                        return json.dumps(parsed, indent=2)
+                    except (json.JSONDecodeError, TypeError):
+                        # If it's not valid JSON, return as-is
+                        return data
+                return str(data)
+            
+            cv_str = format_data(cv_data)
+            job_str = format_data(job_data)
+            company_str = format_data(company_data)
+            
+            # Only create system context if we have data
+            if cv_str or job_str:
+                company_context = ""
+                if company_str:
+                    company_context = f"\n\nCompany Information:\n{company_str}"
+                
+                # Build the system context with available data
+                data_sections = []
+                if cv_str:
+                    data_sections.append(f"CV Data (ResumeInfo JSON):\n{cv_str}")
+                if job_str:
+                    data_sections.append(f"Job Requirements (JobRequirements JSON):\n{job_str}")
+                
+                system_context = f"""You have access to the following structured data for this job application:
+
+{chr(10).join(data_sections)}{company_context}
+
+IMPORTANT: This data is available throughout our conversation. When you need to use tools like analyze_cv_job_alignment, generate_tailored_cv_html, or generate_cover_letter_content, use the FULL JSON data provided above, not truncated versions from earlier messages."""
+                
+                # Insert system message at the beginning
+                writer_messages = [{"role": "system", "content": system_context}] + writer_messages
+            
+            # Insert system message at the beginning
+            writer_messages = [{"role": "system", "content": system_context}] + writer_messages
         
         # Append the new user input to the conversation history
         writer_messages.append({"role": "user", "content": user_input})
@@ -643,6 +761,28 @@ To get started, just share your CV file with me!"""
         response += "\n\nWhat would you like to do next?"
 
     else:  # general_question
+        # Check if we already have CV and job data
+        has_cv = state.get("cv_data") is not None
+        has_job = state.get("job_data") is not None
+        
+        # If we have both, suggest starting the tailoring process
+        if has_cv and has_job:
+            return {
+                "supervisor_response": """Great! I can see that you've already uploaded your CV and job description. 
+
+We're all set to start tailoring your application materials! 
+
+I can help you:
+1. Analyze how well your CV matches the job requirements
+2. Create a tailored version of your CV that highlights relevant experience
+3. Generate a compelling cover letter
+
+Would you like me to start the analysis and begin tailoring your CV?""",
+                "next_action": "wait_for_input",
+                "ready_for_writer": True,
+                "messages": [{"role": "assistant", "content": "Detected both CV and job data available"}]
+            }
+        
         # Use LLM for general questions
         llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.7)
         
