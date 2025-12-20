@@ -20,7 +20,7 @@ Tools:
 - update_resume_with_clarifications: Update tool (incorporates user answers)
 
 Data Model:
-- ResumeInfo: Pydantic model defining resume structure (name, email, phone, skills, education, experience)
+- ResumeInfo: Pydantic model defining resume structure (name, email, phone, skills, education, experience, projects)
 """
 
 from pydantic import BaseModel, Field
@@ -44,6 +44,7 @@ class ResumeInfo(BaseModel):
     skills: list[str] = Field(description="List of professional skills")
     education: list[str] = Field(description="Educational qualifications")
     experience: list[str] = Field(description="Work experience entries")
+    projects: list[str] = Field(description="List of projects the applicant has worked on")
 
 @tool
 def extract_resume_info(pdf_path: str = "", pdf_bytes: bytes = b"") -> str:
@@ -60,7 +61,7 @@ def extract_resume_info(pdf_path: str = "", pdf_bytes: bytes = b"") -> str:
             
         Returns:
             JSON string with extracted resume information including name, 
-            skills, education, experience, contact info, etc.
+            skills, education, experience, projects, contact info, etc.
     """
     # Extract text from PDF
     text = ""

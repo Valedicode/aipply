@@ -30,6 +30,7 @@ class ResumeInfo(BaseModel):
     skills: List[str] = Field(description="List of professional skills")
     education: List[str] = Field(description="Educational qualifications")
     experience: List[str] = Field(description="Work experience entries")
+    projects: List[str] = Field(description="List of projects the applicant has worked on")
 
 
 class CVExtractionResponse(BaseModel):

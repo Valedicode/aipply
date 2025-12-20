@@ -264,10 +264,57 @@ export async function startSupervisorSession(): Promise<SupervisorSessionInitRes
 export async function sendSupervisorMessage(
   request: SupervisorMessageRequest
 ): Promise<SupervisorSessionResponse> {
-  return apiFetch<SupervisorSessionResponse>('/supervisor/session/message', {
-    method: 'POST',
-    body: JSON.stringify(request),
-  });
+  try {
+    // Use AbortController for timeout handling
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 300000); // 5 minutes timeout
+
+    const response = await fetch(`${API_BASE_URL}/supervisor/session/message`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(request),
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeoutId);
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new APIError(
+        errorData.detail || errorData.error || 'API request failed',
+        response.status,
+        errorData.detail
+      );
+    }
+
+    return await response.json();
+  } catch (error) {
+    if (error instanceof APIError) {
+      throw error;
+    }
+    // AbortController timeout
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new APIError(
+        'Request timed out. The backend is taking too long to process. Please try again.',
+        0,
+        'Request timeout'
+      );
+    }
+    // Network errors or connection reset
+    if (error instanceof TypeError || (error instanceof Error && (error.message.includes('fetch') || error.message.includes('ECONNRESET') || error.message.includes('socket')))) {
+      throw new APIError(
+        'Cannot connect to backend server. Please ensure the backend is running at http://localhost:8000',
+        0,
+        'Network connection failed'
+      );
+    }
+    throw new APIError(
+      error instanceof Error ? error.message : 'Request failed',
+      0
+    );
+  }
 }
 
 /**
