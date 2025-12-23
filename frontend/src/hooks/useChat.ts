@@ -18,8 +18,8 @@ interface UseChatReturn {
   setInputText: (text: string) => void;
   isLoading: boolean;
   error: string | null;
-  textareaRef: React.RefObject<HTMLTextAreaElement>;
-  messagesEndRef: React.RefObject<HTMLDivElement>;
+  textareaRef: React.RefObject<HTMLTextAreaElement | null>;
+  messagesEndRef: React.RefObject<HTMLDivElement | null>;
   handleSendMessage: () => Promise<void>;
   handleKeyDown: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void;
   clearError: () => void;
