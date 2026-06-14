@@ -9,17 +9,27 @@ interface ChatMessageProps {
 
 export const ChatMessage = ({ message, generatedFiles, isFadingOut = false }: ChatMessageProps) => {
   // Simple markdown-like formatting for plain text
-  // Converts ## headers, **text** to bold, *text* to italic, [text](url) to links, and preserves line breaks
+  // Converts ## and ### headers, **text** to bold, *text* to italic, [text](url) to links, and preserves line breaks
   const formatText = (text: string) => {
     // Split by line breaks to preserve structure
     return text.split('\n').map((line, lineIndex) => {
-      // Check if line is a header (## Header text)
-      const headerMatch = line.match(/^##\s+(.+)$/);
-      if (headerMatch) {
+      // Check if line is a ### header (h3)
+      const h3Match = line.match(/^###\s+(.+)$/);
+      if (h3Match) {
         return (
           <h3 key={lineIndex} className="mt-4 mb-2 text-base font-semibold text-slate-900 dark:text-slate-100 first:mt-0">
-            {headerMatch[1]}
+            {h3Match[1]}
           </h3>
+        );
+      }
+      
+      // Check if line is a ## header (h2)
+      const h2Match = line.match(/^##\s+(.+)$/);
+      if (h2Match) {
+        return (
+          <h2 key={lineIndex} className="mt-6 mb-3 text-lg font-bold text-slate-900 dark:text-slate-100 first:mt-0">
+            {h2Match[1]}
+          </h2>
         );
       }
       
