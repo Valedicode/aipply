@@ -1,0 +1,323 @@
+{
+  "_metadata": {
+    "version": "1.0.0",
+    "description": "Curated skill graph for compatibility scoring v2. Each family groups skills that share underlying paradigms or APIs, so a candidate proficient in one member can typically be productive in another quickly. intra_transferability is the default 0-1 score assigned when matching two members of the same family.",
+    "scoring_notes": "intra_transferability ~0.85 means 'experienced practitioner can be productive within 1-2 weeks'. Values are conservative defaults; real recruiter judgment should refine these."
+  },
+  "aliases": {
+    "js": "javascript",
+    "ts": "typescript",
+    "py": "python",
+    "tf": "tensorflow",
+    "k8s": "kubernetes",
+    "pg": "postgresql",
+    "postgres": "postgresql",
+    "psql": "postgresql",
+    "mongo": "mongodb",
+    "vue.js": "vue",
+    "vuejs": "vue",
+    "node": "nodejs",
+    "node.js": "nodejs",
+    "react.js": "react",
+    "reactjs": "react",
+    "next": "nextjs",
+    "next.js": "nextjs",
+    "nuxt.js": "nuxt",
+    "nuxtjs": "nuxt",
+    "express.js": "express",
+    "expressjs": "express",
+    "solid.js": "solidjs",
+    "solid": "solidjs",
+    "gcp": "google cloud",
+    "gcloud": "google cloud",
+    "aws cloud": "aws",
+    "amazon web services": "aws",
+    "ms azure": "azure",
+    "microsoft azure": "azure",
+    "objective c": "objective-c",
+    "objc": "objective-c",
+    "c sharp": "c#",
+    "csharp": "c#",
+    "cpp": "c++",
+    "c plus plus": "c++",
+    "golang": "go",
+    "rust lang": "rust",
+    "scikit learn": "scikit-learn",
+    "sklearn": "scikit-learn",
+    "pytorch lightning": "pytorch",
+    "tensor flow": "tensorflow",
+    "huggingface": "hugging face",
+    "hf": "hugging face",
+    "rabbit mq": "rabbitmq",
+    "elastic search": "elasticsearch",
+    "es": "elasticsearch",
+    "github actions": "github-actions",
+    "gh actions": "github-actions",
+    "gitlab ci": "gitlab-ci",
+    "circle ci": "circleci",
+    "travis ci": "travis",
+    "k6": "k6 load testing"
+  },
+  "families": {
+    "frontend_frameworks": {
+      "members": ["react", "vue", "angular", "svelte", "solidjs", "preact", "lit"],
+      "paradigm": "component-based reactive UI frameworks",
+      "intra_transferability": 0.85
+    },
+    "frontend_meta_frameworks": {
+      "members": ["nextjs", "nuxt", "remix", "sveltekit", "astro", "gatsby"],
+      "paradigm": "SSR/SSG meta-frameworks built on top of frontend frameworks",
+      "intra_transferability": 0.8
+    },
+    "css_frameworks": {
+      "members": ["tailwind", "tailwindcss", "bootstrap", "bulma", "chakra ui", "material ui", "mui", "ant design", "shadcn", "shadcn/ui"],
+      "paradigm": "utility-first or component CSS systems",
+      "intra_transferability": 0.85
+    },
+    "state_management_js": {
+      "members": ["redux", "zustand", "mobx", "jotai", "recoil", "pinia", "vuex", "ngrx"],
+      "paradigm": "client-side state management libraries",
+      "intra_transferability": 0.8
+    },
+    "backend_python": {
+      "members": ["django", "flask", "fastapi", "starlette", "tornado", "pyramid", "bottle", "sanic"],
+      "paradigm": "Python HTTP/web frameworks",
+      "intra_transferability": 0.85
+    },
+    "backend_node": {
+      "members": ["express", "koa", "hapi", "nestjs", "fastify", "adonis"],
+      "paradigm": "Node.js HTTP/web frameworks",
+      "intra_transferability": 0.85
+    },
+    "backend_jvm": {
+      "members": ["spring boot", "spring", "quarkus", "micronaut", "vert.x", "play framework", "dropwizard"],
+      "paradigm": "JVM web frameworks",
+      "intra_transferability": 0.8
+    },
+    "backend_go": {
+      "members": ["gin", "echo", "fiber", "chi", "beego", "go-kit"],
+      "paradigm": "Go HTTP frameworks/toolkits",
+      "intra_transferability": 0.85
+    },
+    "backend_ruby": {
+      "members": ["rails", "ruby on rails", "sinatra", "hanami"],
+      "paradigm": "Ruby web frameworks",
+      "intra_transferability": 0.8
+    },
+    "backend_dotnet": {
+      "members": ["asp.net", "asp.net core", ".net core", ".net", "blazor"],
+      "paradigm": ".NET web frameworks",
+      "intra_transferability": 0.85
+    },
+    "deep_learning_frameworks": {
+      "members": ["pytorch", "tensorflow", "keras", "jax", "flax", "mxnet", "paddlepaddle"],
+      "paradigm": "tensor autograd / deep learning frameworks",
+      "intra_transferability": 0.85
+    },
+    "classical_ml": {
+      "members": ["scikit-learn", "xgboost", "lightgbm", "catboost", "statsmodels"],
+      "paradigm": "classical/tabular machine learning libraries",
+      "intra_transferability": 0.85
+    },
+    "llm_tooling": {
+      "members": ["langchain", "llamaindex", "haystack", "dspy", "semantic kernel", "autogen", "crewai"],
+      "paradigm": "LLM application/orchestration frameworks",
+      "intra_transferability": 0.8
+    },
+    "vector_databases": {
+      "members": ["pinecone", "weaviate", "chroma", "qdrant", "milvus", "pgvector", "faiss"],
+      "paradigm": "vector / embedding stores for similarity search",
+      "intra_transferability": 0.8
+    },
+    "data_processing": {
+      "members": ["pandas", "polars", "dask", "modin", "vaex"],
+      "paradigm": "Python dataframe libraries",
+      "intra_transferability": 0.85
+    },
+    "distributed_compute": {
+      "members": ["spark", "apache spark", "pyspark", "flink", "apache flink", "beam", "apache beam", "ray"],
+      "paradigm": "distributed data/compute engines",
+      "intra_transferability": 0.75
+    },
+    "data_orchestration": {
+      "members": ["airflow", "apache airflow", "prefect", "dagster", "luigi", "argo workflows", "mage"],
+      "paradigm": "workflow orchestration / DAG schedulers",
+      "intra_transferability": 0.8
+    },
+    "streaming": {
+      "members": ["kafka", "apache kafka", "pulsar", "apache pulsar", "kinesis", "redpanda", "nats jetstream"],
+      "paradigm": "distributed streaming platforms",
+      "intra_transferability": 0.8
+    },
+    "message_queues": {
+      "members": ["rabbitmq", "activemq", "sqs", "amazon sqs", "azure service bus", "gcp pub/sub", "google pub/sub", "celery", "sidekiq", "bullmq"],
+      "paradigm": "message queues and async task brokers",
+      "intra_transferability": 0.75
+    },
+    "sql_databases": {
+      "members": ["postgresql", "mysql", "mariadb", "sql server", "mssql", "oracle", "oracle db", "cockroachdb", "yugabyte", "aurora", "amazon aurora"],
+      "paradigm": "relational SQL databases",
+      "intra_transferability": 0.85
+    },
+    "lite_sql": {
+      "members": ["sqlite", "duckdb"],
+      "paradigm": "embedded/analytical SQL engines",
+      "intra_transferability": 0.85
+    },
+    "nosql_document": {
+      "members": ["mongodb", "couchdb", "couchbase", "documentdb", "amazon documentdb", "firestore"],
+      "paradigm": "document-oriented NoSQL stores",
+      "intra_transferability": 0.8
+    },
+    "nosql_keyvalue": {
+      "members": ["redis", "memcached", "dynamodb", "amazon dynamodb", "etcd", "consul kv"],
+      "paradigm": "key-value / cache stores",
+      "intra_transferability": 0.75
+    },
+    "search_engines": {
+      "members": ["elasticsearch", "opensearch", "solr", "apache solr", "meilisearch", "typesense", "algolia"],
+      "paradigm": "full-text search engines",
+      "intra_transferability": 0.8
+    },
+    "analytics_warehouses": {
+      "members": ["snowflake", "bigquery", "google bigquery", "redshift", "amazon redshift", "databricks sql", "synapse", "azure synapse", "clickhouse"],
+      "paradigm": "cloud analytics data warehouses",
+      "intra_transferability": 0.8
+    },
+    "lakehouse_table_formats": {
+      "members": ["delta lake", "iceberg", "apache iceberg", "hudi", "apache hudi"],
+      "paradigm": "open table formats for lakehouse architectures",
+      "intra_transferability": 0.85
+    },
+    "cloud_providers": {
+      "members": ["aws", "azure", "google cloud", "oracle cloud", "ibm cloud", "alibaba cloud", "digitalocean", "linode"],
+      "paradigm": "public cloud platforms",
+      "intra_transferability": 0.7
+    },
+    "iaas_compute": {
+      "members": ["ec2", "aws ec2", "gce", "google compute engine", "azure vm", "azure virtual machines"],
+      "paradigm": "managed virtual machine compute",
+      "intra_transferability": 0.85
+    },
+    "serverless_compute": {
+      "members": ["lambda", "aws lambda", "cloud functions", "google cloud functions", "azure functions", "cloudflare workers", "vercel functions"],
+      "paradigm": "serverless function-as-a-service",
+      "intra_transferability": 0.8
+    },
+    "containers": {
+      "members": ["docker", "podman", "containerd", "buildah"],
+      "paradigm": "OCI container runtimes/builders",
+      "intra_transferability": 0.9
+    },
+    "container_orchestration": {
+      "members": ["kubernetes", "openshift", "ecs", "amazon ecs", "nomad", "docker swarm"],
+      "paradigm": "container orchestration platforms",
+      "intra_transferability": 0.75
+    },
+    "k8s_tooling": {
+      "members": ["helm", "kustomize", "argocd", "flux", "fluxcd"],
+      "paradigm": "kubernetes packaging and gitops tools",
+      "intra_transferability": 0.8
+    },
+    "iac": {
+      "members": ["terraform", "opentofu", "pulumi", "cloudformation", "aws cdk", "cdk", "bicep", "ansible"],
+      "paradigm": "infrastructure as code tools",
+      "intra_transferability": 0.75
+    },
+    "ci_cd": {
+      "members": ["github-actions", "gitlab-ci", "circleci", "travis", "jenkins", "buildkite", "drone", "azure pipelines", "teamcity", "argo workflows"],
+      "paradigm": "CI/CD pipeline platforms",
+      "intra_transferability": 0.85
+    },
+    "observability_metrics": {
+      "members": ["prometheus", "grafana", "datadog", "new relic", "dynatrace", "cloudwatch", "stackdriver", "google cloud monitoring"],
+      "paradigm": "metrics and monitoring platforms",
+      "intra_transferability": 0.8
+    },
+    "observability_tracing": {
+      "members": ["jaeger", "zipkin", "opentelemetry", "otel", "honeycomb", "tempo"],
+      "paradigm": "distributed tracing systems",
+      "intra_transferability": 0.85
+    },
+    "logging_stack": {
+      "members": ["elk", "elk stack", "logstash", "fluentd", "fluentbit", "loki", "splunk"],
+      "paradigm": "log aggregation pipelines",
+      "intra_transferability": 0.8
+    },
+    "mobile_native": {
+      "members": ["swift", "swiftui", "objective-c", "kotlin", "android", "android sdk", "ios", "ios sdk"],
+      "paradigm": "native mobile platforms",
+      "intra_transferability": 0.55
+    },
+    "mobile_cross_platform": {
+      "members": ["react native", "flutter", "expo", "ionic", "xamarin", "maui", ".net maui"],
+      "paradigm": "cross-platform mobile frameworks",
+      "intra_transferability": 0.75
+    },
+    "testing_js": {
+      "members": ["jest", "vitest", "mocha", "jasmine", "ava"],
+      "paradigm": "JavaScript unit testing frameworks",
+      "intra_transferability": 0.9
+    },
+    "testing_e2e": {
+      "members": ["cypress", "playwright", "selenium", "webdriverio", "puppeteer", "testcafe"],
+      "paradigm": "end-to-end browser testing tools",
+      "intra_transferability": 0.85
+    },
+    "testing_python": {
+      "members": ["pytest", "unittest", "nose", "nose2"],
+      "paradigm": "Python unit testing frameworks",
+      "intra_transferability": 0.9
+    },
+    "build_tools_js": {
+      "members": ["webpack", "vite", "rollup", "parcel", "esbuild", "turbopack", "swc"],
+      "paradigm": "JavaScript bundlers/build tools",
+      "intra_transferability": 0.85
+    },
+    "package_managers_js": {
+      "members": ["npm", "yarn", "pnpm", "bun"],
+      "paradigm": "JavaScript package managers",
+      "intra_transferability": 0.95
+    },
+    "graphql_servers": {
+      "members": ["apollo server", "graphql-yoga", "hasura", "postgraphile", "graphene"],
+      "paradigm": "GraphQL server implementations",
+      "intra_transferability": 0.8
+    },
+    "auth_protocols": {
+      "members": ["oauth", "oauth2", "openid connect", "oidc", "saml", "jwt"],
+      "paradigm": "authentication/authorization protocols",
+      "intra_transferability": 0.7
+    },
+    "auth_services": {
+      "members": ["auth0", "okta", "cognito", "amazon cognito", "firebase auth", "supabase auth", "clerk", "keycloak"],
+      "paradigm": "managed identity providers",
+      "intra_transferability": 0.8
+    },
+    "static_typed_systems_languages": {
+      "members": ["c", "c++", "rust", "zig"],
+      "paradigm": "low-level systems languages with manual/explicit memory control",
+      "intra_transferability": 0.6
+    },
+    "managed_compiled_languages": {
+      "members": ["java", "kotlin", "scala", "c#", "go"],
+      "paradigm": "statically typed managed-runtime languages",
+      "intra_transferability": 0.65
+    },
+    "dynamic_languages": {
+      "members": ["python", "ruby", "javascript", "typescript", "php", "perl"],
+      "paradigm": "dynamically typed scripting languages",
+      "intra_transferability": 0.6
+    },
+    "etl_tools": {
+      "members": ["dbt", "fivetran", "airbyte", "stitch", "matillion", "informatica"],
+      "paradigm": "data integration / ELT platforms",
+      "intra_transferability": 0.75
+    },
+    "bi_tools": {
+      "members": ["tableau", "power bi", "looker", "metabase", "superset", "apache superset", "mode"],
+      "paradigm": "business intelligence / dashboarding tools",
+      "intra_transferability": 0.8
+    }
+  }
+}

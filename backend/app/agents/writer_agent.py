@@ -33,7 +33,6 @@ Key Features:
 - Company-aware cover letter generation
 """
 
-from pydantic import Field
 from langchain.agents import create_agent
 from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
@@ -42,9 +41,27 @@ from pathlib import Path
 import json
 import html
 import dotenv
-
-# Import models from centralized schemas
-from app.models.schemas import CVTailoringPlan, CoverLetterContent
+import os
+import re
+from typing import List, Dict, Any, Optional
+from app.models.schemas import (
+    CVTailoringPlan,
+    CoverLetterContent,
+    CompatibilityReport,
+    JobSummary,
+    SelectedContent,
+    RewrittenContent,
+)
+from app.agents.scoring_agent import (
+    calculate_semantic_similarity,
+    calculate_bm25_score,
+    calculate_compatibility_score,
+    match_skill_pairs,
+    assess_transferability_llm,
+    calculate_compatibility_score_v2,
+    build_gap_analysis,
+    _calculate_compatibility_score_v2_internal,
+)
 
 dotenv.load_dotenv()
 
@@ -855,6 +872,381 @@ def generate_cover_letter_docx(content_json: str, output_filename: str, applican
         return f"Error generating cover letter Word document: {str(e)}"
 
 # ============================================
+# Enhanced Tailoring Tools (Phase 1 & 2)
+# ============================================
+
+@tool
+def generate_job_summary(job_json: str) -> str:
+    """
+    Generate a brief summary of the job posting including role, responsibilities, and required skills.
+    
+    Args:
+        job_json: JobRequirements JSON string from job_agent output
+        
+    Returns:
+        JSON string with job summary containing:
+        - role: Job title and level
+        - responsibilities: Key responsibilities
+        - required_skills: List of required skills
+        - preferred_skills: Nice-to-have skills
+        - key_notes: Other important points
+    """
+    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+    structured_llm = llm.with_structured_output(JobSummary)
+
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", (
+            "You are summarizing a job posting. "
+            "Extract the role title with seniority level, all key responsibilities, "
+            "required skills, preferred/nice-to-have skills, and any other important "
+            "notes (location, employment type, culture fit signals, etc.)."
+        )),
+        ("user", "Job posting data:\n{job}")
+    ])
+
+    try:
+        chain = prompt | structured_llm
+        summary: JobSummary = chain.invoke({"job": job_json})
+        return summary.model_dump_json()
+    except Exception as e:
+        return json.dumps({
+            "role": "Unknown",
+            "responsibilities": [],
+            "required_skills": [],
+            "preferred_skills": [],
+            "key_notes": [f"Summarization failed: {str(e)[:120]}"]
+        })
+
+def _extract_compatibility_report(compatibility_data: Dict[str, Any]) -> Optional[CompatibilityReport]:
+    """
+    Accept either a v2 CompatibilityReport directly or the legacy shim shape
+    (with `report_v2` embedded). Returns None if the input is malformed.
+    """
+    if not isinstance(compatibility_data, dict):
+        return None
+    candidate = compatibility_data
+    if "report_v2" in compatibility_data and isinstance(compatibility_data["report_v2"], dict):
+        candidate = compatibility_data["report_v2"]
+    try:
+        if "aggregate_score" in candidate or "dimensions" in candidate:
+            return CompatibilityReport.model_validate(candidate)
+    except Exception:
+        return None
+    return None
+
+
+def _intensity_for_level(level: str) -> str:
+    return {
+        "excellent": "minor",
+        "high": "minor",
+        "medium": "moderate",
+        "low": "major",
+        "unknown": "moderate",
+    }.get(level, "moderate")
+
+
+def _build_directives_from_report(report: CompatibilityReport) -> Dict[str, Any]:
+    """
+    Translate a CompatibilityReport into concrete per-section directives the
+    downstream tailoring tools can act on without needing further LLM reasoning.
+    """
+    gap = report.gap_analysis
+    directives: List[Dict[str, Any]] = []
+    focus_areas: List[str] = []
+
+    # Hard skills: emit per-transferable directives with bridge bullets
+    for sk in gap.transferable_skills:
+        directives.append({
+            "type": "inject_bridge_bullet",
+            "section": "experience_or_projects",
+            "required_skill": sk.required_skill,
+            "candidate_skill": sk.matched_with,
+            "kind": sk.kind,
+            "transferability": sk.transferability,
+            "bullet": sk.bridge_bullet or (
+                f"Leveraged {sk.matched_with} on prior work; "
+                f"{sk.matched_with} and {sk.required_skill} share core paradigms."
+                if sk.matched_with else f"Highlight transferable experience related to {sk.required_skill}."
+            ),
+            "rationale": sk.rationale,
+        })
+
+    if gap.matched_skills:
+        focus_areas.append("emphasize_matched_skills")
+        directives.append({
+            "type": "emphasize_skills_section",
+            "skills_to_surface": [m.matched_with or m.required_skill for m in gap.matched_skills],
+            "rationale": "These job-required skills are explicitly held by the candidate; surface them prominently.",
+        })
+
+    if gap.transferable_skills:
+        focus_areas.append("inject_bridge_bullets")
+
+    if gap.missing_skills:
+        focus_areas.append("address_missing_skills")
+        omit_count = sum(1 for m in gap.missing_skills if m.transferability < 0.2)
+        soften_count = len(gap.missing_skills) - omit_count
+        directives.append({
+            "type": "handle_missing_skills",
+            "missing": [m.required_skill for m in gap.missing_skills],
+            "guidance": (
+                f"Omit unfamiliar tooling that has no transferable foothold "
+                f"({omit_count} skills); for the remaining {soften_count}, "
+                "use neutral phrasing that emphasizes adjacent experience without overclaiming."
+            ),
+        })
+
+    # Per-dimension directives
+    dim_lookup = {d.name: d for d in report.dimensions}
+    if dim_lookup.get("experience") and dim_lookup["experience"].score < 0.5:
+        focus_areas.append("amplify_experience_outcomes")
+        directives.append({
+            "type": "amplify_outcomes",
+            "section": "experience",
+            "guidance": "Surface quantified outcomes (scope, scale, impact) in the most relevant roles to compensate for the years gap.",
+        })
+    if dim_lookup.get("seniority") and dim_lookup["seniority"].score < 0.5:
+        focus_areas.append("strengthen_seniority_signals")
+        directives.append({
+            "type": "strengthen_seniority_language",
+            "section": "experience",
+            "guidance": "Where truthful, use scope/leadership verbs (led, owned, mentored, drove) and add team/scope sizing.",
+        })
+    if dim_lookup.get("ats_keywords") and dim_lookup["ats_keywords"].score < 0.55:
+        focus_areas.append("inject_ats_keywords")
+        directives.append({
+            "type": "inject_keywords",
+            "section": "skills_and_summary",
+            "guidance": "Insert exact-match required-skill terms in the skills section and summary so ATS keyword filters pass.",
+        })
+    if dim_lookup.get("domain") and dim_lookup["domain"].score < 0.5:
+        focus_areas.append("reframe_domain_language")
+        directives.append({
+            "type": "reframe_domain",
+            "section": "summary_and_titles",
+            "guidance": "Reframe role titles and summary to use the job's domain terminology where the candidate has matching experience.",
+        })
+
+    if gap.over_qualified_signals:
+        focus_areas.append("temper_over_qualification")
+        directives.append({
+            "type": "temper_seniority",
+            "guidance": "Keep senior-only details concise; emphasize hands-on contribution to avoid signaling over-qualification.",
+            "signals": gap.over_qualified_signals,
+        })
+
+    return {
+        "scoring_version": "v2",
+        "aggregate_score": report.aggregate_score,
+        "level": report.level,
+        "intensity": _intensity_for_level(report.level),
+        "strategy": report.interpretation,
+        "focus_areas": list(dict.fromkeys(focus_areas)),  # de-duped, stable order
+        "directives": directives,
+        "summary": {
+            "matched_skills_count": len(gap.matched_skills),
+            "transferable_skills_count": len(gap.transferable_skills),
+            "missing_skills_count": len(gap.missing_skills),
+            "over_qualified_signals_count": len(gap.over_qualified_signals),
+        },
+    }
+
+
+@tool
+def decide_tailoring_strategy(compatibility_score_json: str, cv_json: str, job_json: str) -> str:
+    """
+    Decide tailoring strategy from a CompatibilityReport (v2) or the legacy
+    compatibility score response.
+
+    Produces concrete per-skill directives:
+    - inject_bridge_bullet for each transferable skill (with draft bullet)
+    - emphasize_skills_section listing directly matched skills
+    - handle_missing_skills with omit/soften guidance
+    - amplify_outcomes / strengthen_seniority_language / inject_keywords /
+      reframe_domain when those dimensions score low
+    - temper_seniority if over-qualification signals were detected
+
+    These directives are consumed directly by select_prioritize_content and
+    rewrite_enhance_content - no further LLM reasoning required to pick a
+    strategy.
+
+    Args:
+        compatibility_score_json: JSON from calculate_compatibility_score (v1
+            shim) or calculate_compatibility_score_v2.
+        cv_json: ResumeInfo JSON string.
+        job_json: JobRequirements JSON string.
+
+    Returns:
+        JSON string with strategy, intensity, focus_areas, and a structured
+        directives list.
+    """
+    try:
+        compatibility_data = json.loads(compatibility_score_json) if isinstance(compatibility_score_json, str) else compatibility_score_json
+    except json.JSONDecodeError as e:
+        return json.dumps({
+            "error": f"Invalid compatibility JSON: {str(e)}",
+            "strategy": "standard",
+            "intensity": "moderate",
+            "focus_areas": [],
+            "directives": [],
+        })
+
+    report = _extract_compatibility_report(compatibility_data)
+
+    # If we couldn't parse a v2 report (e.g. caller passed a raw v1 dict from
+    # a non-shim source), recompute v2 on the fly so we always have a rich
+    # structure to act on.
+    if report is None:
+        try:
+            cv_data = json.loads(cv_json) if isinstance(cv_json, str) else cv_json
+            job_data = json.loads(job_json) if isinstance(job_json, str) else job_json
+            if isinstance(cv_data, dict) and isinstance(job_data, dict):
+                report = _calculate_compatibility_score_v2_internal(cv_data, job_data)
+        except Exception:
+            report = None
+
+    if report is None:
+        # Last-resort fallback to the old level-based defaults
+        score = 0.0
+        level = "unknown"
+        if isinstance(compatibility_data, dict):
+            score = float(compatibility_data.get("compatibility_score", 0.0) or 0.0)
+            level = str(compatibility_data.get("level", "unknown"))
+        fallback = {
+            "scoring_version": "fallback",
+            "aggregate_score": score,
+            "level": level,
+            "intensity": _intensity_for_level(level),
+            "strategy": "Could not parse compatibility report; using level-based default.",
+            "focus_areas": ["skills", "keywords", "section_ordering"],
+            "directives": [],
+        }
+        return json.dumps(fallback)
+
+    return json.dumps(_build_directives_from_report(report), indent=2)
+
+@tool
+def select_prioritize_content(cv_json: str, job_json: str, tailoring_strategy_json: str) -> str:
+    """
+    Select and prioritize the most relevant resume content based on job requirements.
+
+    Args:
+        cv_json: ResumeInfo JSON string
+        job_json: JobRequirements JSON string
+        tailoring_strategy_json: JSON string from decide_tailoring_strategy
+
+    Returns:
+        JSON string with selected bullets, recommended section order, and emphasis plan
+        (fields: selected_bullets, section_order, sections_to_emphasize, items_to_de_emphasize)
+    """
+    try:
+        strategy_data = json.loads(tailoring_strategy_json)
+        focus_areas: List[str] = strategy_data.get("focus_areas", [])
+        directives: List[str] = strategy_data.get("directives", [])
+
+        llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+        structured_llm = llm.with_structured_output(SelectedContent)
+
+        prompt = ChatPromptTemplate.from_messages([
+            ("system", (
+                "You are a career consultant selecting and prioritising resume content for a specific job. "
+                "Your decisions must be driven by the tailoring strategy directives provided. "
+                "CRITICAL RULES:\n"
+                "- Only work with content that EXISTS in the CV — do not invent bullets.\n"
+                "- Score each bullet 0–1 for relevance to the job requirements.\n"
+                "- Recommend a section ordering that puts the most impactful sections first.\n"
+                "- Mark low-value items for de-emphasis (do not delete — the candidate reviews first)."
+            )),
+            ("user", (
+                "CV Data:\n{cv}\n\n"
+                "Job Data:\n{job}\n\n"
+                "Focus Areas: {focus}\n\n"
+                "Strategy Directives:\n{directives}\n\n"
+                "Select and prioritise the most relevant content."
+            ))
+        ])
+
+        chain = prompt | structured_llm
+        result: SelectedContent = chain.invoke({
+            "cv": cv_json,
+            "job": job_json,
+            "focus": ", ".join(focus_areas),
+            "directives": "\n".join(directives) if directives else "None provided."
+        })
+        return result.model_dump_json()
+
+    except Exception as e:
+        return json.dumps({
+            "error": str(e),
+            "selected_bullets": [],
+            "section_order": [],
+            "sections_to_emphasize": [],
+            "items_to_de_emphasize": []
+        })
+
+@tool
+def rewrite_enhance_content(cv_json: str, job_json: str, selected_content_json: str, tailoring_strategy_json: str) -> str:
+    """
+    Rewrite and enhance resume content to emphasize job relevance.
+
+    Args:
+        cv_json: Original ResumeInfo JSON string
+        job_json: JobRequirements JSON string
+        selected_content_json: JSON string from select_prioritize_content
+        tailoring_strategy_json: JSON string from decide_tailoring_strategy
+
+    Returns:
+        JSON string with rewritten bullets, updated summary, and per-bullet confidence scores
+        (fields: rewritten_bullets[{original, rewritten, confidence, keywords_added}],
+         updated_summary, keywords_inserted)
+    """
+    try:
+        strategy_data = json.loads(tailoring_strategy_json)
+        directives: List[str] = strategy_data.get("directives", [])
+
+        llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.3)
+        structured_llm = llm.with_structured_output(RewrittenContent)
+
+        prompt = ChatPromptTemplate.from_messages([
+            ("system", (
+                "You are a senior career coach rewriting resume bullets to maximise job relevance. "
+                "Apply the strategy directives precisely.\n\n"
+                "ABSOLUTE RULES:\n"
+                "- Reword EXISTING content only — never fabricate experience, metrics, or skills.\n"
+                "- Weave in job keywords naturally — forced keyword stuffing degrades ATS scores.\n"
+                "- Lead each bullet with a strong action verb.\n"
+                "- Keep the candidate's authentic voice.\n"
+                "- Only enhance descriptions — do not replace their substance.\n"
+                "- For each bullet, report a confidence score (0–1) for how well the rewrite "
+                "matches the job, and list keywords actually added."
+            )),
+            ("user", (
+                "Original CV:\n{cv}\n\n"
+                "Job Requirements:\n{job}\n\n"
+                "Selected Content:\n{selected}\n\n"
+                "Strategy Directives:\n{directives}\n\n"
+                "Rewrite and enhance the content."
+            ))
+        ])
+
+        chain = prompt | structured_llm
+        result: RewrittenContent = chain.invoke({
+            "cv": cv_json,
+            "job": job_json,
+            "selected": selected_content_json,
+            "directives": "\n".join(directives) if directives else "None provided."
+        })
+        return result.model_dump_json()
+
+    except Exception as e:
+        return json.dumps({
+            "error": str(e),
+            "rewritten_bullets": [],
+            "updated_summary": "",
+            "keywords_inserted": []
+        })
+
+# ============================================
 # Agent Configuration
 # ============================================
 
@@ -876,6 +1268,133 @@ IMPORTANT CONTEXT:
 - Do NOT use truncated or partial data from earlier messages - always reference the complete data from the system context
 
 YOUR WORKFLOW (FOLLOW THIS SEQUENCE):
+
+ENHANCED TAILORING MODE (when both CV and job data are provided):
+Use this comprehensive 6-step workflow for optimal results:
+
+STEP 1: INPUT & SUMMARIES
+   - Display the extracted CV information to the user (show what was extracted, no summary needed)
+   - Call generate_job_summary to create a brief summary of the job posting
+   - Present both: the CV data overview and the job summary (role, responsibilities, required skills)
+   - FORMATTING: You may use ## or ### headers, NO code blocks, NO lists with dashes (-)
+   - Use plain text with line breaks for lists
+   - Example format:
+     "Overview of Resume and Job Match
+     
+     Job Title: [title]
+     
+     Responsibilities:
+     [responsibility 1]
+     [responsibility 2]
+     
+     Required Skills:
+     Technical Skills: [list as plain text, separated by commas or line breaks]
+     Soft Skills: [list as plain text, separated by commas or line breaks]"
+   - This helps verify extraction accuracy and sets context
+
+STEP 2: COMPATIBILITY ANALYSIS
+   - Call calculate_compatibility_score with CV and job data
+   - This runs the v2 multi-dimensional scorer which measures five weighted dimensions:
+     * Hard Skills match (40%): per-skill transferability via direct/family/embedding/LLM cascade
+     * Experience alignment (15%): years and depth of relevant experience
+     * Seniority fit (15%): level match between candidate and role
+     * Domain overlap (15%): industry/domain semantic similarity
+     * ATS keyword density (15%): exact-keyword coverage for ATS filters
+   - The tool also returns a gap analysis bucketed into: matched skills, transferable skills (with bridge bullets), and missing skills
+   - Present the aggregate compatibility score, level, per-dimension breakdown, and key gaps
+   - FORMATTING: You may use ## or ### headers, NO code blocks, NO lists with dashes
+   - Use plain text with line breaks, colon format for labels
+   - Example format:
+     "Compatibility Analysis
+
+     Compatibility Score: 0.72 (HIGH)
+
+     Dimension Breakdown:
+     Hard Skills (40%): 0.80 — strong direct and family matches
+     Experience (15%): 0.70 — relevant depth present
+     Seniority (15%): 0.75 — level aligns well
+     Domain (15%): 0.65 — adjacent domain, some reframing needed
+     ATS Keywords (15%): 0.60 — moderate keyword density
+
+     Key Gaps:
+     Transferable: Vue → React (bridge: 'Built component-driven UIs with Vue; transferable to React')
+     Missing: Kubernetes (no equivalent found)
+
+     Interpretation: Strong match. Focus on adding bridge bullets for transferable skills and injecting missing keywords."
+   - Interpretation guidelines:
+     * LOW (< 0.5): Many required skills/experience missing — flag before proceeding
+     * MEDIUM (0.5 - 0.7): Good match with clear areas to improve
+     * HIGH (> 0.7): Strong match, fine-tune and optimise
+     * EXCELLENT (> 0.85): Near-perfect match, polish only
+   - ERROR HANDLING: If score is 0.0 or error occurs:
+     * Check if CV or job data is missing/empty
+     * Try calling the tool again with valid data
+     * If still failing, explain: "The compatibility calculation encountered an issue. This may be due to missing or incomplete data. Let's proceed with manual analysis instead."
+     * Then use analyze_cv_job_alignment as fallback
+
+STEP 3: DECIDE TAILORING STRATEGY
+   - Call decide_tailoring_strategy with compatibility score, CV, and job data
+   - This determines:
+     * Strategy: What approach to take (highlight transferable skills, reorder sections, fine-tune)
+     * Intensity: How much editing needed (major/moderate/minor)
+     * Focus areas: Which sections to prioritize (skills, projects, section_ordering, keywords, etc.)
+   - Present the strategy to the user
+   - FORMATTING: You may use ## or ### headers, NO code blocks
+   - Example format:
+     "Tailoring Strategy
+     
+     Strategy: [strategy description]
+     Intensity: [major/moderate/minor]
+     Focus Areas: [list as plain text, separated by commas]"
+   - If compatibility is LOW, inform user and ask if they want to proceed (may need to highlight transferable skills)
+
+STEP 4: SELECT & PRIORITIZE CONTENT
+   - Call select_prioritize_content with CV, job, and tailoring strategy
+   - This identifies:
+     * Top N bullets per section based on relevance
+     * New ordering for sections and items
+     * Which sections to emphasize
+     * Items to de-emphasize or remove (if any)
+   - Present the selected content and proposed ordering
+   - FORMATTING: You may use ## or ### headers, NO code blocks, NO lists with dashes
+   - Use plain text with line breaks, numbered items as "1. " format
+   - WAIT for user approval before proceeding
+
+STEP 5: REWRITE & ENHANCE CONTENT
+   - Call rewrite_enhance_content with CV, job, selected content, and strategy
+   - This creates:
+     * Rewritten bullets with original and new versions
+     * Enhanced summary/headline (if applicable)
+     * Confidence scores per bullet (0-1) showing job match quality
+     * List of job keywords naturally incorporated
+   - Present the rewritten content with confidence scores
+   - FORMATTING: You may use ## or ### headers, NO code blocks
+   - Show what changed and why in clear, readable format
+   - Example format:
+     "Rewritten Content
+     
+     Original: [bullet text]
+     Enhanced: [rewritten bullet text]
+     Confidence: 0.85 (high match)
+     
+     Changes: [explanation of what changed and why]"
+   - WAIT for user approval
+
+STEP 6: USER REVIEW & EXPORT
+   - Merge the rewritten content from Step 5 back into the CV JSON structure:
+     * Update experience bullets with rewritten versions
+     * Update summary/headline if enhanced
+     * Apply new ordering from Step 4
+   - Call generate_tailored_cv_html with the updated CV JSON and a tailoring plan (can create a simple plan from the strategy)
+   - Present the complete tailored resume HTML for review
+   - Show what changed from the original
+   - Ask user if they're satisfied
+   - If approved, proceed to document generation:
+     * Ask user: "Ready to generate the document? I can create a PDF, Word document (.docx), or both formats. Which would you prefer?"
+     * Call generate_cv_pdf and/or generate_cv_docx with the HTML content
+   - If changes needed, incorporate feedback and repeat Step 5
+
+STANDARD WORKFLOW (alternative, simpler approach):
 
 1. ANALYSIS PHASE:
    - When user provides CV and job data, call analyze_cv_job_alignment
@@ -941,15 +1460,44 @@ NEVER fabricate experience, skills, or achievements
 NEVER proceed to next phase without user confirmation
 NEVER ignore user feedback or constraints
 
+WHEN TO USE ENHANCED VS STANDARD WORKFLOW:
+- Use ENHANCED TAILORING MODE when both CV and job data are provided and user wants comprehensive analysis
+- Use STANDARD WORKFLOW for simpler, faster tailoring or when user prefers a quicker process
+- You can offer both options: "I can use the enhanced tailoring mode for detailed analysis, or the standard workflow for faster results. Which would you prefer?"
+- Enhanced mode provides: compatibility scores, semantic analysis, detailed strategy, confidence scores
+- Standard mode provides: quick gap analysis and tailoring plan
+
+ENHANCED TOOLS REFERENCE:
+- generate_job_summary: Creates structured job summary (role, responsibilities, required/preferred skills) — Step 1
+- calculate_compatibility_score: Multi-dimensional v2 scorer — 5 weighted dimensions (hard_skills 40%, experience/seniority/domain/ats_keywords 15% each) plus skill-level gap analysis — Step 2
+  NOTE: calculate_semantic_similarity and calculate_bm25_score are sub-components used internally; call calculate_compatibility_score directly for Step 2 to get the full report.
+- decide_tailoring_strategy: Consumes the v2 CompatibilityReport and emits per-skill directives (inject_bridge_bullet, emphasize_skills_section, handle_missing_skills, amplify_outcomes, inject_keywords, reframe_domain, temper_seniority) — Step 3
+- select_prioritize_content: Selects top bullets per section with relevance scores, recommends section ordering and emphasis — Step 4
+- rewrite_enhance_content: Rewrites selected bullets with action verbs and job keywords; returns per-bullet confidence scores — Step 5
+
+COMPATIBILITY THRESHOLDS:
+- LOW: < 0.5 - Many gaps, consider transferable skills
+- MEDIUM: 0.5 - 0.7 - Good match, optimize ordering and keywords
+- HIGH: > 0.7 - Strong match, fine-tune and optimize
+
 INTERACTION STYLE:
 - Professional yet friendly
 - Clear and concise in explanations
 - Proactive in asking for clarification
 - Transparent about your process
 - Collaborative, not autonomous
-- Avoid complex markdown structure (no ### or deeper headers, no - lists, no code blocks)
-- You may use simple formatting: ## for section headers, **bold** for emphasis, and *italic* for subtle emphasis
+
+CRITICAL FORMATTING RULES:
+- You MAY use ## headers (two hashes) for major sections
+- You MAY use ### headers (three hashes) for subsections
+- NEVER use code blocks (triple backticks)
+- NEVER use markdown lists with dashes (-) - use plain text with line breaks instead
+- You MAY use **bold** for emphasis and *italic* for subtle emphasis
+- Use plain text with line breaks for lists
+- Use numbered format "1. " for numbered lists
 - Format responses with simple line breaks and plain text structure
+- When presenting compatibility scores, use clear format: "Compatibility Score: 0.72 (HIGH)"
+- When showing data, use simple colon format: "Job Title: [title]" not markdown tables
 
 **CRITICAL - File Downloads:**
 - When you call generate_cv_pdf, generate_cv_docx, generate_cover_letter_pdf, or generate_cover_letter_docx tools, they return a success message
@@ -988,7 +1536,20 @@ agent = create_agent(
         generate_cv_pdf,
         generate_cover_letter_pdf,
         generate_cv_docx,
-        generate_cover_letter_docx
+        generate_cover_letter_docx,
+        # Enhanced tailoring tools
+        generate_job_summary,
+        calculate_semantic_similarity,
+        calculate_bm25_score,
+        calculate_compatibility_score,
+        # v2 multi-dimensional scoring tools
+        match_skill_pairs,
+        assess_transferability_llm,
+        calculate_compatibility_score_v2,
+        build_gap_analysis,
+        decide_tailoring_strategy,
+        select_prioritize_content,
+        rewrite_enhance_content
     ],
     system_prompt=system_prompt
 )

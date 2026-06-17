@@ -6,7 +6,7 @@ These models provide validation, serialization, and documentation for the API.
 """
 
 from pydantic import BaseModel, Field
-from typing import Optional, List, Dict, Any, Literal
+from typing import Optional, List, Dict, Any, Literal, Union
 
 
 # ============================================
@@ -45,8 +45,12 @@ class ResumeInfo(BaseModel):
     )
     skills: List[str] = Field(description="List of professional skills")
     education: List[str] = Field(description="Educational qualifications")
-    experience: List[str] = Field(description="Work experience entries")
-    projects: List[str] = Field(description="List of projects the applicant has worked on")
+    experience: List[Union[Dict[str, Any], str]] = Field(
+        description="Work experience entries. Each entry may be a plain string or a structured dict with keys such as 'position', 'company', 'duration', 'responsibilities'."
+    )
+    projects: List[Union[Dict[str, Any], str]] = Field(
+        description="Project entries. Each entry may be a plain string or a structured dict with keys such as 'name', 'description', 'technologies', 'outcomes'."
+    )
     leadership_activities: Optional[List[str]] = Field(
         default=[],
         description="Leadership roles, extracurricular activities, volunteer work, or other relevant activities"
@@ -165,6 +169,164 @@ class CVTailoringPlan(BaseModel):
     reordering_suggestions: str = Field(description="Suggestions for reordering")
     emphasis_points: List[str] = Field(description="Points to emphasize")
     reasoning: str = Field(description="Reasoning for changes")
+
+
+# ============================================
+# Compatibility Scoring v2 Models
+# ============================================
+
+class SkillMatch(BaseModel):
+    """A single required/preferred job skill resolved against the candidate's CV."""
+    required_skill: str = Field(description="Skill name as it appears in the job posting")
+    matched_with: Optional[str] = Field(
+        default=None,
+        description="Candidate skill that satisfies the requirement (None if missing)"
+    )
+    kind: Literal["direct", "family", "transferable", "missing"] = Field(
+        description=(
+            "How the match was resolved: direct (exact/alias), family "
+            "(same skill-graph family), transferable (LLM/embedding judged "
+            "transferable), or missing"
+        )
+    )
+    transferability: float = Field(
+        ge=0.0,
+        le=1.0,
+        description="0-1 score for how well the candidate skill substitutes for the required one"
+    )
+    rationale: str = Field(
+        default="",
+        description="Short human-readable explanation of why this match was assigned"
+    )
+    bridge_bullet: Optional[str] = Field(
+        default=None,
+        description=(
+            "Suggested resume bullet that highlights the bridge from the "
+            "candidate's existing skill to the required one (only populated "
+            "for transferable matches)"
+        )
+    )
+    is_required: bool = Field(
+        default=True,
+        description="True if this skill came from required_skills, False if preferred"
+    )
+
+
+class DimensionScore(BaseModel):
+    """Score for a single dimension of compatibility."""
+    name: str = Field(description="Dimension name (hard_skills, experience, seniority, domain, ats_keywords)")
+    score: float = Field(ge=0.0, le=1.0, description="Normalized 0-1 score for this dimension")
+    weight: float = Field(ge=0.0, le=1.0, description="Weight of this dimension in the aggregate")
+    rationale: str = Field(default="", description="Short explanation of how the score was reached")
+
+
+class GapAnalysis(BaseModel):
+    """Bucketed view of where the candidate matches, can stretch, or falls short."""
+    matched_skills: List[SkillMatch] = Field(
+        default_factory=list,
+        description="Skills with transferability >= 0.95 (effectively direct matches)"
+    )
+    transferable_skills: List[SkillMatch] = Field(
+        default_factory=list,
+        description="Skills with 0.55 <= transferability < 0.95 (each carries a bridge_bullet)"
+    )
+    missing_skills: List[SkillMatch] = Field(
+        default_factory=list,
+        description="Skills with transferability < 0.55 (real gaps)"
+    )
+    over_qualified_signals: List[str] = Field(
+        default_factory=list,
+        description="Senior signals on the CV not requested by the job (LLM-flagged)"
+    )
+
+
+class CompatibilityReport(BaseModel):
+    """Multi-dimensional compatibility output produced by calculate_compatibility_score_v2."""
+    aggregate_score: float = Field(
+        ge=0.0,
+        le=1.0,
+        description="Weighted aggregate of all dimension scores (0-1)"
+    )
+    level: Literal["low", "medium", "high", "excellent", "unknown"] = Field(
+        description="Discrete band derived from aggregate_score"
+    )
+    interpretation: str = Field(
+        default="",
+        description="Short human-readable summary of the report"
+    )
+    dimensions: List[DimensionScore] = Field(
+        default_factory=list,
+        description="Per-dimension scores and rationales"
+    )
+    gap_analysis: GapAnalysis = Field(
+        default_factory=GapAnalysis,
+        description="Skill bucketing and over-qualification signals"
+    )
+    warnings: List[str] = Field(
+        default_factory=list,
+        description="Non-fatal issues encountered while computing the report"
+    )
+
+
+class JobSummary(BaseModel):
+    """Structured summary of a job posting."""
+    role: str = Field(description="Job title and seniority level")
+    responsibilities: List[str] = Field(description="Key responsibilities and duties")
+    required_skills: List[str] = Field(description="Technical and soft skills required by the posting")
+    preferred_skills: List[str] = Field(default_factory=list, description="Nice-to-have skills mentioned in the posting")
+    key_notes: List[str] = Field(default_factory=list, description="Other important points (culture fit, location, employment type, etc.)")
+
+
+class SelectedBullet(BaseModel):
+    """A single resume bullet selected for emphasis."""
+    section: str = Field(description="Section name this bullet belongs to (e.g. 'experience', 'projects')")
+    original_text: str = Field(description="Original bullet text from the CV")
+    relevance_score: float = Field(ge=0.0, le=1.0, description="0-1 relevance score to the target job")
+    reason: str = Field(default="", description="Why this bullet was selected")
+
+
+class SelectedContent(BaseModel):
+    """Output of the content selection and prioritization step."""
+    selected_bullets: List[SelectedBullet] = Field(
+        default_factory=list,
+        description="Top bullets per section ordered by relevance"
+    )
+    section_order: List[str] = Field(
+        default_factory=list,
+        description="Recommended section ordering for the tailored CV (most impactful first)"
+    )
+    sections_to_emphasize: List[str] = Field(
+        default_factory=list,
+        description="Section names that should receive the most visual weight"
+    )
+    items_to_de_emphasize: List[str] = Field(
+        default_factory=list,
+        description="Bullet texts or section names to downplay or remove"
+    )
+
+
+class BulletRewrite(BaseModel):
+    """A single bullet rewrite."""
+    original: str = Field(description="Original bullet text")
+    rewritten: str = Field(description="Enhanced bullet text (no fabrication)")
+    confidence: float = Field(ge=0.0, le=1.0, description="0-1 score indicating how well the rewritten bullet matches the job")
+    keywords_added: List[str] = Field(default_factory=list, description="Job keywords naturally woven into the rewrite")
+
+
+class RewrittenContent(BaseModel):
+    """Output of the content rewrite and enhancement step."""
+    rewritten_bullets: List[BulletRewrite] = Field(
+        default_factory=list,
+        description="Enhanced bullet points with original and rewritten versions"
+    )
+    updated_summary: str = Field(
+        default="",
+        description="Enhanced professional summary / headline (empty string if not applicable)"
+    )
+    keywords_inserted: List[str] = Field(
+        default_factory=list,
+        description="Complete list of job keywords incorporated across all rewrites"
+    )
 
 
 class CVJobAlignmentResponse(BaseModel):

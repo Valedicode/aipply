@@ -36,7 +36,8 @@ from app.agents.writer_agent import (
     generate_cover_letter_pdf,
     generate_cv_docx,
     generate_cover_letter_docx,
-    agent as writer_agent
+    agent as writer_agent,
+    system_prompt as JOB_TAILORING_SYSTEM_PROMPT,
 )
 from app.services.generic_session_manager import (
     get_session_manager,
@@ -697,44 +698,47 @@ Please provide a neutral summary of this resume. Present the information in this
             initial_message = f"{greeting_message}\n\n{summary_message}"
             
         else:  # job_tailoring
-            # Generate job alignment preview
             cv_json = json.dumps(request.cv_data)
             job_json = json.dumps(request.job_data)
-            
-            # Generate greeting message
-            greeting_prompt = """Please provide a friendly greeting introducing yourself as a resume optimization expert specializing in job-specific tailoring. Then explain that you will provide a summary of the extracted resume information and an overview of how well it matches the job requirements, so we can verify that all information was correctly extracted. Keep it brief and welcoming."""
-            
-            greeting_result = writer_agent.invoke({
+
+            # Build the same full system context used by send_writer_message so the
+            # agent follows the enhanced 6-step workflow from the very first response.
+            init_system_context = JOB_TAILORING_SYSTEM_PROMPT + f"""
+
+--- SESSION DATA (always use these when calling tools) ---
+CV Data (ResumeInfo JSON):
+{cv_json}
+
+Job Data (JobRequirements JSON):
+{job_json}
+"""
+
+            # Single invocation: greet the user, call generate_job_summary (Step 1),
+            # and display the CV overview + job summary to verify extraction accuracy.
+            init_prompt = (
+                "A new job-tailoring session has started. "
+                "Please greet the user warmly (1-2 sentences), then immediately begin "
+                "Step 1 of the enhanced tailoring workflow: display the key CV information "
+                "and call generate_job_summary to produce a structured job summary. "
+                "Present both clearly and ask the user to confirm the extracted data is accurate "
+                "before we proceed to the compatibility analysis."
+            )
+
+            init_result = writer_agent.invoke({
                 "messages": [
-                    {"role": "system", "content": "You are helping with job-specific resume tailoring. Provide an overview of the match."},
-                    {"role": "user", "content": greeting_prompt}
+                    {"role": "system", "content": init_system_context},
+                    {"role": "user", "content": init_prompt}
                 ]
             })
-            
-            greeting_message = greeting_result["messages"][-1].content
-            
-            # Generate summary message
-            summary_prompt = f"""I have both resume and job data ready for tailoring.
 
-Resume: {cv_json}
-
-Job: {job_json}
-
-Please provide a brief overview of how well the resume matches the job requirements, and what we'll do to tailor it."""
-            
-            summary_result = writer_agent.invoke({
-                "messages": [
-                    {"role": "system", "content": "You are helping with job-specific resume tailoring. Provide an overview of the match."},
-                    {"role": "user", "content": summary_prompt}
-                ]
-            })
-            
-            summary_message = summary_result["messages"][-1].content
-            initial_message = f"{greeting_message}\n\n{summary_message}"
+            greeting_message = init_result["messages"][-1].content
+            summary_message = ""
+            initial_message = greeting_message
         
-        # Store initial exchange in session (store both messages)
+        # Store initial exchange in session
         session_manager.add_message(session_id, "assistant", greeting_message)
-        session_manager.add_message(session_id, "assistant", summary_message)
+        if summary_message:
+            session_manager.add_message(session_id, "assistant", summary_message)
         
         return WriterChatSessionInitResponse(
             success=True,
@@ -820,36 +824,21 @@ async def send_writer_message(
         
         # Use different system prompts based on mode
         if mode == "resume_refinement":
-            # Use comprehensive resume refinement prompt
             system_context = RESUME_REFINEMENT_SYSTEM_PROMPT
         else:
-            # Use job tailoring prompt (existing behavior)
-            system_context = f"""You are a professional CV and cover letter writer.
+            # Inject CV and job data into the full enhanced-tailoring system prompt so the
+            # agent has both the complete workflow instructions AND the session data.
+            system_context = JOB_TAILORING_SYSTEM_PROMPT + f"""
 
-Mode: {mode}
-
-CV Data:
+--- SESSION DATA (always use these when calling tools) ---
+CV Data (ResumeInfo JSON):
 {cv_json}
 """
-            
             if job_json:
                 system_context += f"""
-Job Data:
+Job Data (JobRequirements JSON):
 {job_json}
 """
-            
-            system_context += """
-Your role:
-- If in resume_refinement mode: Help improve the resume generally
-- If in job_tailoring mode: Tailor the resume for the specific job
-
-Follow the human-in-the-loop workflow:
-1. Analyze and propose changes
-2. Wait for user approval
-3. Generate content after approval
-4. Create PDFs when requested
-
-Be conversational, helpful, and professional."""
         
         messages.append({"role": "system", "content": system_context})
         
