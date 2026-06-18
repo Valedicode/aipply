@@ -370,12 +370,40 @@ class GenerateCoverLetterRequest(BaseModel):
 
 
 class CoverLetterContent(BaseModel):
-    """Structured cover letter content."""
-    opening_paragraph: str = Field(description="Opening expressing interest in the specific position and company")
-    body_paragraph_1: str = Field(description="First body paragraph connecting relevant experience to job requirements")
-    body_paragraph_2: str = Field(description="Second body paragraph highlighting additional relevant qualifications")
-    body_paragraph_3: str = Field(default="", description="Optional third body paragraph if needed for company-specific points")
-    closing_paragraph: str = Field(description="Closing with call to action and appreciation")
+    """Structured cover letter content.
+
+    For English letters the paragraph fields map as:
+      opening_paragraph  → hook / interest
+      body_paragraph_1/2 → experience ↔ job alignment
+      body_paragraph_3   → optional company-specific point
+      closing_paragraph  → call to action
+
+    For German Anschreiben the same fields map as:
+      opening_paragraph  → Einleitung
+      body_paragraph_1/2 → Hauptteil
+      body_paragraph_3   → optional second Hauptteil paragraph
+      closing_paragraph  → Schlussteil
+    Additionally betreff and grussformel are populated.
+    """
+    language: str = Field(
+        default="english",
+        description="Output language/format: 'english' for a standard English cover letter, 'german' for a formal German Anschreiben (Sie-form)"
+    )
+    # --- German-only fields (empty string for English) ---
+    betreff: str = Field(
+        default="",
+        description="German Betreff (subject line), e.g. 'Bewerbung als Senior Software Engineer'. Populated only for language='german'."
+    )
+    grussformel: str = Field(
+        default="",
+        description="German Grußformel (valediction), e.g. 'Mit freundlichen Grüßen'. Populated only for language='german'."
+    )
+    # --- Paragraph content (used by both English and German) ---
+    opening_paragraph: str = Field(description="English: opening hook. German: Einleitung paragraph.")
+    body_paragraph_1: str = Field(description="English: first experience paragraph. German: first Hauptteil paragraph.")
+    body_paragraph_2: str = Field(description="English: second qualifications paragraph. German: second Hauptteil paragraph.")
+    body_paragraph_3: str = Field(default="", description="Optional. English: company-specific point. German: optional additional Hauptteil paragraph.")
+    closing_paragraph: str = Field(description="English: call to action / appreciation. German: Schlussteil paragraph.")
 
 
 class GenerateCoverLetterResponse(BaseModel):
