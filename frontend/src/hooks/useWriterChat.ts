@@ -11,6 +11,7 @@ import type { Message, ResumeInfo, JobRequirements, WriterChatSessionInitRequest
 interface UseWriterChatProps {
   cvData: ResumeInfo | null;
   jobData: JobRequirements | null;
+  flowMode?: 'cv_only' | 'job_tailoring' | null;
 }
 
 interface UseWriterChatReturn {
@@ -42,7 +43,8 @@ interface UseWriterChatReturn {
 
 export const useWriterChat = ({ 
   cvData, 
-  jobData 
+  jobData,
+  flowMode,
 }: UseWriterChatProps): UseWriterChatReturn => {
   // Session state
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -81,10 +83,10 @@ export const useWriterChat = ({
     setSessionError(null);
 
     try {
-      // Determine mode based on whether job data exists
-      const mode: 'resume_refinement' | 'job_tailoring' = jobData 
-        ? 'job_tailoring' 
-        : 'resume_refinement';
+      // Determine mode: explicit flowMode takes precedence over jobData inference
+      const mode: 'resume_refinement' | 'job_tailoring' = flowMode === 'cv_only'
+        ? 'resume_refinement'
+        : (jobData ? 'job_tailoring' : 'resume_refinement');
 
       const request: WriterChatSessionInitRequest = {
         cv_data: cvData,
@@ -142,7 +144,7 @@ export const useWriterChat = ({
     } finally {
       setIsInitializing(false);
     }
-  }, [sessionId, cvData, jobData]);
+  }, [sessionId, cvData, jobData, flowMode]);
 
   const addMessage = useCallback((message: Message) => {
     setMessages((prev) => [...prev, message]);
