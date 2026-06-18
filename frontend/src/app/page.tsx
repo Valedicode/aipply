@@ -14,7 +14,8 @@ import { useWriterChat } from '@/hooks/useWriterChat';
 export default function Home() {
   const { isDark, toggleTheme } = useTheme();
   
-  // New state for manual control
+  // Flow mode: null = not yet chosen, cv_only = review CV, job_tailoring = tailor to job
+  const [flowMode, setFlowMode] = useState<'cv_only' | 'job_tailoring' | null>(null);
   const [jobSkipped, setJobSkipped] = useState(false);
   const [analysisStarted, setAnalysisStarted] = useState(false);
   const [chatReady, setChatReady] = useState(false);
@@ -84,9 +85,19 @@ export default function Home() {
   } = useWriterChat({
     cvData,
     jobData,
+    flowMode,
   });
 
   // Handlers for new functionality
+  const handleSetFlowMode = (mode: 'cv_only' | 'job_tailoring') => {
+    setFlowMode(mode);
+    if (mode === 'cv_only') {
+      setJobSkipped(true);
+    } else {
+      setJobSkipped(false);
+    }
+  };
+
   const handleSkipJob = () => {
     setJobSkipped(true);
   };
@@ -112,23 +123,27 @@ export default function Home() {
   };
 
   // Determine if analysis can be started
-  // Can start if resume is uploaded and either job is skipped or valid job input is provided
-  const canStartAnalysis = !!uploadedFile && !isUploading && (jobSkipped || isValidJobInput);
+  const canStartAnalysis = flowMode === 'cv_only'
+    ? !!uploadedFile && !isUploading
+    : !!uploadedFile && !isUploading && (jobSkipped || isValidJobInput);
   
   // Determine if both uploads are complete and analysis is done
-  const inputsReady = !!cvData && (jobSkipped || !!jobData);
+  const inputsReady = !!cvData && (flowMode === 'cv_only' || jobSkipped || !!jobData);
   
   // Initialize Writer chat when CV and optional job data are ready (during "Prepare chat" phase)
   useEffect(() => {
     if (!analysisStarted || !cvData || sessionId || isInitializing) return;
+    if (flowMode === null) return;
     
-    // Only initialize if we have CV data and (job is skipped or job data is ready)
-    const readyToChat = cvData && (jobSkipped || jobData);
+    // cv_only: only CV needed; job_tailoring: need job skipped or job data ready
+    const readyToChat = flowMode === 'cv_only'
+      ? true
+      : (jobSkipped || !!jobData);
     
     if (readyToChat) {
       initializeSession();
     }
-  }, [analysisStarted, cvData, jobData, jobSkipped, sessionId, isInitializing, initializeSession]);
+  }, [analysisStarted, cvData, jobData, jobSkipped, flowMode, sessionId, isInitializing, initializeSession]);
 
   // Mark chat as ready when session initialization completes
   useEffect(() => {
@@ -219,6 +234,8 @@ export default function Home() {
           {!analysisStarted ? (
             <div className="transition-opacity duration-500 ease-in-out">
               <UploadSection
+                flowMode={flowMode}
+                onSetFlowMode={handleSetFlowMode}
                 uploadedFile={uploadedFile}
                 isDragging={isDragging}
                 uploadError={uploadError}

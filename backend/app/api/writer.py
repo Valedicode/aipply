@@ -64,9 +64,10 @@ GLOBAL OBJECTIVES
 ────────────────────────────────
 - Optimize for recruiter skim-reading (5–10 seconds per section)
 - Improve technical signal without exaggeration or false claims
-- Prefer impact-driven wording over task descriptions
+- Prefer impact-driven wording over task descriptions; flag bullets that lack measurable outcomes (numbers, percentages, scale, scope) and propose quantified rewrites
 - Preserve a professional, neutral tone (no buzzword inflation)
-- Keep the resume suitable for ATS systems
+- Keep the resume suitable for ATS systems; flag ATS anti-patterns: non-standard section titles, missing domain keywords, over-reliance on tables or columns that parsers strip
+- Check formatting coherence: consistent date formats (e.g. "Month YYYY"), uniform bullet style, logical section order, and clean whitespace
 - Assume a European/German academic & industry context unless stated otherwise
 
 Do NOT invent experience, metrics, or technologies.
@@ -111,12 +112,13 @@ For each role:
 - Evaluate relevance to software / AI roles
 - Identify bullets that are descriptive instead of impact-driven
 - Check action–technology–outcome structure
+- Flag bullets that lack measurable outcomes and propose a quantified rewrite (e.g. add team size, latency improvement, user count, percentage gain)
 - Remove redundancy and weak phrasing
 
 Rewrite bullets to:
 - Start with strong action verbs
 - Mention technologies naturally
-- Highlight contribution, responsibility, or outcome
+- Highlight contribution, responsibility, or outcome with a concrete metric wherever possible
 
 Output:
 - Show the ORIGINAL experience section data (as extracted from the resume) before improvements
@@ -696,7 +698,7 @@ Please provide a neutral summary of this resume. Present the information in this
             
             summary_message = summary_result["messages"][-1].content
             initial_message = f"{greeting_message}\n\n{summary_message}"
-            
+
         else:  # job_tailoring
             cv_json = json.dumps(request.cv_data)
             job_json = json.dumps(request.job_data)
@@ -735,10 +737,17 @@ Job Data (JobRequirements JSON):
             summary_message = ""
             initial_message = greeting_message
         
-        # Store initial exchange in session
-        session_manager.add_message(session_id, "assistant", greeting_message)
-        if summary_message:
+        # Store initial exchange in session.
+        # For resume_refinement: persist the user prompts that contain cv_json so the
+        # agent has the structured data available throughout the conversation history.
+        if request.mode == "resume_refinement":
+            session_manager.add_message(session_id, "assistant", greeting_message)
+            session_manager.add_message(session_id, "user", summary_prompt)
             session_manager.add_message(session_id, "assistant", summary_message)
+        else:
+            session_manager.add_message(session_id, "assistant", greeting_message)
+            if summary_message:
+                session_manager.add_message(session_id, "assistant", summary_message)
         
         return WriterChatSessionInitResponse(
             success=True,
@@ -824,7 +833,11 @@ async def send_writer_message(
         
         # Use different system prompts based on mode
         if mode == "resume_refinement":
-            system_context = RESUME_REFINEMENT_SYSTEM_PROMPT
+            system_context = RESUME_REFINEMENT_SYSTEM_PROMPT + f"""
+
+--- CANDIDATE RESUME DATA (structured, always reference this when discussing the CV) ---
+{cv_json}
+"""
         else:
             # Inject CV and job data into the full enhanced-tailoring system prompt so the
             # agent has both the complete workflow instructions AND the session data.

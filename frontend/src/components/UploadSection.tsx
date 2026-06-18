@@ -6,6 +6,10 @@ import { HowItWorks } from '@/components/HowItWorks';
 import type { ResumeInfo, JobRequirements } from '@/types';
 
 interface UploadSectionProps {
+  // Flow mode selection
+  flowMode: 'cv_only' | 'job_tailoring' | null;
+  onSetFlowMode: (mode: 'cv_only' | 'job_tailoring') => void;
+
   // Resume upload props
   uploadedFile: File | null;
   isDragging: boolean;
@@ -34,7 +38,7 @@ interface UploadSectionProps {
   textValidationError: string | null;
   onJobClear: () => void;
   
-  // New props for manual start
+  // Manual start props
   jobSkipped: boolean;
   onSkipJob: () => void;
   onUnskipJob: () => void;
@@ -44,6 +48,8 @@ interface UploadSectionProps {
 }
 
 export const UploadSection = ({
+  flowMode,
+  onSetFlowMode,
   uploadedFile,
   isDragging,
   uploadError,
@@ -80,18 +86,90 @@ export const UploadSection = ({
       {/* Hero Section */}
       <div className="w-full max-w-6xl px-6 py-12 text-center">
         <h1 className="mb-6 text-4xl font-bold tracking-tight text-slate-900 dark:text-slate-100 sm:text-5xl lg:text-6xl">
-          Create Tailored Job Applications with AI
+          {flowMode === 'cv_only'
+            ? 'Improve Your CV with AI'
+            : flowMode === 'job_tailoring'
+              ? 'Create Tailored Job Applications with AI'
+              : 'What would you like to do?'}
         </h1>
         <p className="mx-auto mb-12 max-w-2xl text-lg text-slate-600 dark:text-slate-400 sm:text-xl">
-          Upload your resume and job description to generate a perfectly tailored resume and compelling cover letter that stands out
+          {flowMode === 'cv_only'
+            ? 'Upload your resume for a structured quality review covering clarity, ATS readiness, quantified impact, and formatting'
+            : flowMode === 'job_tailoring'
+              ? 'Upload your resume and job description to generate a perfectly tailored resume and compelling cover letter that stands out'
+              : 'Choose a flow to get started'}
         </p>
 
-        {/* Main Upload Area - Clean and Centered */}
+        {/* Mode Selection — shown before a flow is chosen */}
+        {flowMode === null && (
+          <div className="mx-auto w-full max-w-3xl">
+            <div className="grid gap-6 sm:grid-cols-2">
+              {/* Review my CV */}
+              <button
+                onClick={() => onSetFlowMode('cv_only')}
+                className="group flex flex-col items-center rounded-2xl border-2 border-slate-200 bg-white p-8 text-left shadow-lg transition-all hover:border-indigo-400 hover:shadow-xl dark:border-slate-700 dark:bg-slate-800 dark:hover:border-indigo-500"
+              >
+                <div className="mb-5 rounded-full bg-indigo-100 p-5 transition-colors group-hover:bg-indigo-200 dark:bg-indigo-900/30 dark:group-hover:bg-indigo-900/50">
+                  <svg
+                    className="h-10 w-10 text-indigo-600 dark:text-indigo-400"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={1.5}
+                      d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                    />
+                  </svg>
+                </div>
+                <h2 className="mb-2 text-xl font-semibold text-slate-900 dark:text-slate-100">
+                  Review my CV
+                </h2>
+                <p className="text-sm text-slate-600 dark:text-slate-400">
+                  Get a structured quality review: clarity, ATS readiness, quantified impact, and formatting
+                </p>
+              </button>
+
+              {/* Tailor to a job */}
+              <button
+                onClick={() => onSetFlowMode('job_tailoring')}
+                className="group flex flex-col items-center rounded-2xl border-2 border-slate-200 bg-white p-8 text-left shadow-lg transition-all hover:border-indigo-400 hover:shadow-xl dark:border-slate-700 dark:bg-slate-800 dark:hover:border-indigo-500"
+              >
+                <div className="mb-5 rounded-full bg-indigo-100 p-5 transition-colors group-hover:bg-indigo-200 dark:bg-indigo-900/30 dark:group-hover:bg-indigo-900/50">
+                  <svg
+                    className="h-10 w-10 text-indigo-600 dark:text-indigo-400"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={1.5}
+                      d="M21 13.255A23.931 23.931 0 0112 15c-3.183 0-6.22-.62-9-1.745M16 6V4a2 2 0 00-2-2h-4a2 2 0 00-2 2v2m4 6h.01M5 20h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
+                    />
+                  </svg>
+                </div>
+                <h2 className="mb-2 text-xl font-semibold text-slate-900 dark:text-slate-100">
+                  Tailor to a job
+                </h2>
+                <p className="text-sm text-slate-600 dark:text-slate-400">
+                  Match your CV to a specific job description and generate tailored application materials
+                </p>
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Main Upload Area — shown after flow is chosen */}
+        {flowMode !== null && (
         <div className="mx-auto w-full max-w-4xl space-y-8">
           {/* Upload Cards Grid */}
-          <div className="grid gap-8 lg:grid-cols-2">
+          <div className={flowMode === 'cv_only' ? 'flex justify-center' : 'grid gap-8 lg:grid-cols-2'}>
             {/* Resume Upload Card */}
-            <div className="rounded-2xl bg-white p-8 shadow-lg dark:bg-slate-800">
+            <div className={`rounded-2xl bg-white p-8 shadow-lg dark:bg-slate-800${flowMode === 'cv_only' ? ' w-full max-w-lg' : ''}`}>
               <div className="mb-6 flex items-center justify-center">
                 <div className="rounded-full bg-indigo-100 p-6 dark:bg-indigo-900/30">
                   <svg
@@ -133,8 +211,8 @@ export const UploadSection = ({
               />
             </div>
 
-            {/* Job Description Card */}
-            <div className="rounded-2xl bg-white p-8 shadow-lg dark:bg-slate-800">
+            {/* Job Description Card — only shown in job_tailoring flow */}
+            {flowMode === 'job_tailoring' && <div className="rounded-2xl bg-white p-8 shadow-lg dark:bg-slate-800">
               <div className="mb-6 flex items-center justify-center">
                 <div className="rounded-full bg-indigo-100 p-6 dark:bg-indigo-900/30">
                   <svg
@@ -222,7 +300,7 @@ export const UploadSection = ({
                   </button>
                 </div>
               )}
-            </div>
+            </div>}
           </div>
 
           {/* Start Analysis Button */}
@@ -271,21 +349,24 @@ export const UploadSection = ({
                         d="M13 10V3L4 14h7v7l9-11h-7z"
                       />
                     </svg>
-                    Start Analysis
+                    {flowMode === 'cv_only' ? 'Start CV Review' : 'Start Analysis'}
                   </span>
                 )}
               </button>
               
               <p className="text-center text-sm text-slate-600 dark:text-slate-400">
-                {jobSkipped || !jobData
-                  ? 'Analyze your resume for general improvements'
-                  : 'Analyze your resume against the job requirements'}
+                {flowMode === 'cv_only'
+                  ? 'Review your CV for quality, clarity, and ATS readiness'
+                  : (jobSkipped || !jobData
+                    ? 'Analyze your resume for general improvements'
+                    : 'Analyze your resume against the job requirements')}
               </p>
             </div>
           )}
 
           {/* Note: after Start Analysis, this view swaps to a dedicated loading screen */}
         </div>
+        )}
       </div>
 
       {/* Instructions Section */}
