@@ -224,6 +224,10 @@ p {
     text-align: justify;
 }
 
+.betreff {
+    margin-bottom: 1.5em;
+}
+
 .closing {
     margin-top: 2em;
 }
@@ -364,38 +368,104 @@ def generate_tailored_cv_html(cv_json: str, tailoring_plan_json: str) -> str:
     return result.content
 
 @tool
-def generate_cover_letter_content(cv_json: str, job_json: str, company_json: str = "") -> str:
+def generate_cover_letter_content(cv_json: str, job_json: str, company_json: str = "", language: str = "english") -> str:
     """
     Generate tailored cover letter content for the job application.
-    
+
     Creates a compelling, authentic cover letter that connects the candidate's
     background to the job requirements and company culture.
-    
+
     Args:
         cv_json: ResumeInfo JSON from cv_agent
         job_json: JobRequirements JSON from job_agent
         company_json: Optional CompanyInfo JSON from job_agent for company-specific points
-        
+        language: Output language/format.
+            "english" (default) → standard English cover letter (3-4 paragraphs)
+            "german"            → formal German Anschreiben in Sie-form with
+                                  Betreff, Einleitung, Hauptteil, Schlussteil,
+                                  and Grußformel
+
     Returns:
-        JSON string with CoverLetterContent structure (paragraph-by-paragraph)
-        
+        JSON string with CoverLetterContent structure.
+        For English: opening/body/closing paragraphs populated; betreff and
+        grussformel are empty strings.
+        For German: betreff and grussformel populated; opening_paragraph →
+        Einleitung, body_paragraph_1/2 → Hauptteil, closing_paragraph →
+        Schlussteil; language field set to "german".
+
     Note:
-        The letter is structured in 3-4 paragraphs:
+        English letter structure (3-4 paragraphs):
         - Opening: Express interest and how you learned about the role
         - Body 1-2: Connect relevant experiences to job requirements
         - Body 3 (optional): Address company-specific points
         - Closing: Call to action and appreciation
+
+        German Anschreiben structure:
+        - Betreff: Subject line naming the exact position
+        - Anrede: Formal salutation (generated separately as recipient_info)
+        - Einleitung: Why applying, brief self-introduction
+        - Hauptteil (1-2 paragraphs): Specific qualifications and experience
+        - Schlussteil: Motivation summary, request for interview
+        - Grußformel: Formal valediction
     """
     llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.4)
     structured_llm = llm.with_structured_output(CoverLetterContent)
-    
+
     # Build context with optional company info
     company_context = ""
     if company_json and company_json.strip():
         company_context = f"\n\nCompany Information:\n{company_json}"
-    
-    prompt = ChatPromptTemplate.from_messages([
-        ("system", """You are writing a professional cover letter.
+
+    if language.lower() == "german":
+        prompt = ChatPromptTemplate.from_messages([
+            ("system", """Du schreibst ein professionelles Anschreiben auf Deutsch für eine Bewerbung.
+
+        FORMALE VORGABEN:
+        1. Sprache: Ausschließlich Deutsch, formelles Sie durchgehend
+        2. Register: Formell-sachlich, klar und präzise — kein Marketingjargon
+        3. Länge: 250–350 Wörter Gesamttext (ohne Betreff und Grußformel)
+        4. Aufbau:
+           - betreff: Einzeiliger Betreff, der die exakte Stellenbezeichnung nennt,
+             z. B. „Bewerbung als Senior Software Engineer (Ref.-Nr. 12345)"
+           - opening_paragraph (Einleitung): Ein kurzer Absatz — warum diese Stelle,
+             kurze Selbstvorstellung
+           - body_paragraph_1 (1. Hauptteil): Konkrete Qualifikationen und
+             Erfahrungen, die direkt auf die Stellenanforderungen einzahlen
+           - body_paragraph_2 (2. Hauptteil): Weitere relevante Kompetenzen oder
+             Projekte; bei Bedarf Unternehmenbezug
+           - body_paragraph_3 (optional): Nur befüllen, wenn Unternehmensinformationen
+             vorliegen und ein spezifischer Mehrwert hergestellt werden kann
+           - closing_paragraph (Schlussteil): Motivation bekräftigen,
+             Gesprächswunsch äußern, Verfügbarkeit nennen
+           - grussformel: „Mit freundlichen Grüßen" (Standard) oder eine
+             situationsangemessene Alternative
+
+        5. Inhaltliche Prinzipien:
+           - KONKRET: Echte Erfahrungen und Kenntnisse aus dem Lebenslauf referenzieren
+           - AUSGERICHTET: Zeigen, dass die Anforderungen der Stelle verstanden wurden
+           - MEHRWERT: Erklären, welchen Beitrag die Kandidatin/der Kandidat leistet
+           - AUTHENTISCH: Den Stil der Bewerberin/des Bewerbers wahren
+
+        VERMEIDEN:
+        - Generische Floskeln wie „Hiermit bewerbe ich mich ..."
+        - Reine Wiederholung des Lebenslaufs
+        - Übertriebenes Eigenlob oder unterwürfige Formulierungen
+        - Anglizismen und Buzzwords
+        - Du-Form oder Kumpelton
+        - Englische Wörter oder Satzteile"""),
+            ("user", """Lebenslauf der Kandidatin / des Kandidaten:
+        {cv}
+
+        Stellenanforderungen:
+        {job}
+        {company}
+
+        Schreibe ein überzeugendes, maßgeschneidertes Anschreiben auf Deutsch (Sie-Form).
+        Setze language=\"german\" und befülle betreff sowie grussformel entsprechend.""")
+        ])
+    else:
+        prompt = ChatPromptTemplate.from_messages([
+            ("system", """You are writing a professional cover letter.
 
         WRITING GUIDELINES:
         1. Tone: Professional yet personable, enthusiastic but not over-the-top
@@ -422,7 +492,7 @@ def generate_cover_letter_content(cv_json: str, job_json: str, company_json: str
         - Explaining why YOU want the job (focus on what YOU bring)
         - Desperation or begging tone
         - Clichés and buzzwords"""),
-                ("user", """Candidate's CV:
+            ("user", """Candidate's CV:
         {cv}
 
         Job Requirements:
@@ -430,11 +500,11 @@ def generate_cover_letter_content(cv_json: str, job_json: str, company_json: str
         {company}
 
         Write a compelling, tailored cover letter.""")
-    ])
-    
+        ])
+
     chain = prompt | structured_llm
-    result = chain.invoke({"cv": cv_json, "job": job_json,"company": company_context})
-    
+    result = chain.invoke({"cv": cv_json, "job": job_json, "company": company_context})
+
     return result.model_dump_json(indent=2)
 
 @tool
@@ -558,7 +628,10 @@ def generate_cover_letter_pdf(content_json: str, output_filename: str, applicant
         # Construct full output path
         output_path = output_dir / output_filename
         
-        # Build paragraphs list (excluding empty optional paragraph)
+        # Determine language/format
+        is_german = content.get('language', 'english').lower() == 'german'
+
+        # Build body paragraphs list (excluding empty optional paragraph)
         paragraphs = [
             content['opening_paragraph'],
             content['body_paragraph_1'],
@@ -567,22 +640,69 @@ def generate_cover_letter_pdf(content_json: str, output_filename: str, applicant
         if content.get('body_paragraph_3', '').strip():
             paragraphs.append(content['body_paragraph_3'])
         paragraphs.append(content['closing_paragraph'])
-        
+
         # Generate paragraph HTML with proper escaping
-        # Escape all paragraphs to prevent HTML injection
         paragraphs_html = '\n'.join([f'<p>{html.escape(p)}</p>' for p in paragraphs])
-        
+
         # Get current date
         from datetime import datetime
-        current_date = datetime.now().strftime("%B %d, %Y")
-        
+        if is_german:
+            # German locale date format: "18. Juni 2026"
+            GERMAN_MONTHS = {
+                1: "Januar", 2: "Februar", 3: "März", 4: "April",
+                5: "Mai", 6: "Juni", 7: "Juli", 8: "August",
+                9: "September", 10: "Oktober", 11: "November", 12: "Dezember"
+            }
+            now = datetime.now()
+            current_date = f"{now.day}. {GERMAN_MONTHS[now.month]} {now.year}"
+        else:
+            current_date = datetime.now().strftime("%B %d, %Y")
+
         # Escape user-provided data to prevent HTML injection
         escaped_name = html.escape(applicant_name)
         escaped_contact = html.escape(applicant_contact)
         escaped_recipient = html.escape(recipient_info)
-        
-        # Build complete HTML
-        full_html = f"""<!DOCTYPE html>
+
+        if is_german:
+            betreff = html.escape(content.get('betreff', ''))
+            grussformel = html.escape(content.get('grussformel', 'Mit freundlichen Grüßen'))
+            betreff_html = f'<div class="betreff"><strong>{betreff}</strong></div>' if betreff else ''
+            salutation = f"Sehr geehrte/r {escaped_recipient}," if escaped_recipient and escaped_recipient != "Hiring Manager" else "Sehr geehrte Damen und Herren,"
+            full_html = f"""<!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="utf-8">
+            <title>Anschreiben - {escaped_name}</title>
+        </head>
+        <body>
+            <div class="header">
+                <strong>{escaped_name}</strong><br>
+                {escaped_contact}
+            </div>
+
+            <div class="date">
+                {current_date}
+            </div>
+
+            {betreff_html}
+
+            <div class="greeting">
+                {salutation}
+            </div>
+
+            {paragraphs_html}
+
+            <div class="closing">
+                {grussformel}
+            </div>
+
+            <div class="signature">
+                {escaped_name}
+            </div>
+        </body>
+        </html>"""
+        else:
+            full_html = f"""<!DOCTYPE html>
         <html>
         <head>
             <meta charset="utf-8">
@@ -593,21 +713,21 @@ def generate_cover_letter_pdf(content_json: str, output_filename: str, applicant
                 <strong>{escaped_name}</strong><br>
                 {escaped_contact}
             </div>
-            
+
             <div class="date">
                 {current_date}
             </div>
-            
+
             <div class="greeting">
                 Dear {escaped_recipient},
             </div>
-            
+
             {paragraphs_html}
-            
+
             <div class="closing">
                 Sincerely,
             </div>
-            
+
             <div class="signature">
                 {escaped_name}
             </div>
@@ -816,54 +936,94 @@ def generate_cover_letter_docx(content_json: str, output_filename: str, applican
     try:
         from docx import Document
         from docx.shared import Pt
+        from docx.enum.text import WD_ALIGN_PARAGRAPH
         from datetime import datetime
-        
+
         # Parse cover letter content
         content_data = json.loads(content_json)
-        
+
+        is_german = content_data.get('language', 'english').lower() == 'german'
+
         # Ensure output directory exists
         output_dir = DEFAULT_OUTPUT_DIR
         output_dir.mkdir(parents=True, exist_ok=True)
-        
+
         # Construct full output path
         output_path = output_dir / output_filename
-        
+
         # Create document
         doc = Document()
-        
+
         # Header with name and contact
         header_para = doc.add_paragraph()
         header_para.add_run(applicant_name).bold = True
         header_para.add_run(f"\n{applicant_contact}")
-        
+
         # Date
-        from docx.enum.text import WD_ALIGN_PARAGRAPH
-        current_date = datetime.now().strftime("%B %d, %Y")
+        if is_german:
+            GERMAN_MONTHS = {
+                1: "Januar", 2: "Februar", 3: "März", 4: "April",
+                5: "Mai", 6: "Juni", 7: "Juli", 8: "August",
+                9: "September", 10: "Oktober", 11: "November", 12: "Dezember"
+            }
+            now = datetime.now()
+            current_date = f"{now.day}. {GERMAN_MONTHS[now.month]} {now.year}"
+        else:
+            current_date = datetime.now().strftime("%B %d, %Y")
+
         date_para = doc.add_paragraph(current_date)
         date_para.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-        
-        # Greeting
+
+        # German Betreff (subject line) before salutation
+        if is_german:
+            betreff = content_data.get('betreff', '').strip()
+            if betreff:
+                betreff_para = doc.add_paragraph()
+                betreff_para.add_run(betreff).bold = True
+
+        # Greeting / Salutation
         greeting_para = doc.add_paragraph()
-        greeting_para.add_run(f"Dear {recipient_info},")
-        
-        # Body paragraphs
-        if content_data.get('paragraphs'):
-            for para_text in content_data['paragraphs']:
+        if is_german:
+            if recipient_info and recipient_info != "Hiring Manager":
+                salutation = f"Sehr geehrte/r {recipient_info},"
+            else:
+                salutation = "Sehr geehrte Damen und Herren,"
+        else:
+            salutation = f"Dear {recipient_info},"
+        greeting_para.add_run(salutation)
+
+        # Body paragraphs — read from CoverLetterContent fields
+        body_fields = [
+            content_data.get('opening_paragraph', ''),
+            content_data.get('body_paragraph_1', ''),
+            content_data.get('body_paragraph_2', ''),
+        ]
+        body_para_3 = content_data.get('body_paragraph_3', '').strip()
+        if body_para_3:
+            body_fields.append(body_para_3)
+        body_fields.append(content_data.get('closing_paragraph', ''))
+
+        for para_text in body_fields:
+            if para_text.strip():
                 doc.add_paragraph(para_text)
-        
-        # Closing
-        closing_para = doc.add_paragraph("Sincerely,")
+
+        # Closing / Grußformel
+        if is_german:
+            grussformel = content_data.get('grussformel', 'Mit freundlichen Grüßen')
+            closing_para = doc.add_paragraph(grussformel)
+        else:
+            closing_para = doc.add_paragraph("Sincerely,")
         closing_para.space_after = Pt(12)
-        
+
         # Signature
         signature_para = doc.add_paragraph(applicant_name)
         signature_para.space_before = Pt(24)
-        
+
         # Save document
         doc.save(str(output_path))
-        
+
         return f"Cover letter Word document generated successfully! The file '{output_filename}' is ready for download. You can customize the formatting in Microsoft Word or Google Docs."
-        
+
     except ImportError:
         return "Error: python-docx library is not installed. Please install it to generate Word documents."
     except json.JSONDecodeError as e:
@@ -1331,6 +1491,28 @@ STEP 2: COMPATIBILITY ANALYSIS
      * Try calling the tool again with valid data
      * If still failing, explain: "The compatibility calculation encountered an issue. This may be due to missing or incomplete data. Let's proceed with manual analysis instead."
      * Then use analyze_cv_job_alignment as fallback
+   - AFTER presenting the score and dimension breakdown, always add a plain-language "Weak Points" section.
+     This section MUST appear before Step 3 and MUST be written in plain, jargon-free sentences — no scores,
+     no percentages, no technical labels. Identify the 2–4 most significant gaps and state them directly.
+     Rules:
+     * For each missing skill: one sentence naming the skill and why it matters for this role.
+     * For each low-scoring dimension (< 0.6): one sentence explaining what the gap means in practice.
+     * For transferable skills: one sentence noting the gap and the bridge that exists.
+     * Do NOT pad this section — if there are no meaningful weak points, say so in one sentence.
+   - Example Weak Points format:
+     "Weak Points
+
+     You have no listed experience with Kubernetes, which is a hard requirement for container
+     orchestration in this role — this is the most significant gap.
+
+     Your background is primarily in e-commerce; the role targets fintech, so some reframing of
+     domain experience will be needed.
+
+     You have not worked at the senior/lead level before; the role expects team leadership, which
+     is not evidenced in your CV.
+
+     Your Vue.js experience is transferable to React, but you will need to surface that connection
+     explicitly — a bridge bullet in your experience section will help."
 
 STEP 3: DECIDE TAILORING STRATEGY
    - Call decide_tailoring_strategy with compatibility score, CV, and job data
@@ -1338,11 +1520,19 @@ STEP 3: DECIDE TAILORING STRATEGY
      * Strategy: What approach to take (highlight transferable skills, reorder sections, fine-tune)
      * Intensity: How much editing needed (major/moderate/minor)
      * Focus areas: Which sections to prioritize (skills, projects, section_ordering, keywords, etc.)
-   - Present the strategy to the user
+   - BEFORE presenting the strategy details, open with a brief bridging paragraph that references
+     the weak points identified in Step 2 and states explicitly how the strategy will address each one.
+     Keep this to 2–4 sentences. Example:
+     "Based on the weak points above, here is how the tailoring strategy will address them:
+     The missing Kubernetes experience will be handled by injecting the keyword in your skills section
+     and noting adjacent container experience in your project bullets. The fintech domain gap will be
+     addressed by reframing your payments and fraud-detection work. The leadership gap cannot be
+     fabricated — we will surface any mentoring or cross-functional coordination already in your CV."
+   - Then present the full strategy
    - FORMATTING: You may use ## or ### headers, NO code blocks
    - Example format:
      "Tailoring Strategy
-     
+
      Strategy: [strategy description]
      Intensity: [major/moderate/minor]
      Focus Areas: [list as plain text, separated by commas]"
@@ -1429,8 +1619,14 @@ STANDARD WORKFLOW (alternative, simpler approach):
    - Note: Word documents have minimal formatting so users can easily customize them
 
 4. COVER LETTER PHASE (if requested):
-   - Call generate_cover_letter_content with CV, job, and company data
+   - Before calling generate_cover_letter_content, ask the user which language/format they want:
+     "Would you like the cover letter in English (standard cover letter) or German (formal Anschreiben in Sie-form)?"
+     * If the user says "English" or doesn't specify: pass language="english"
+     * If the user says "German", "Deutsch", "Anschreiben", or similar: pass language="german"
+   - Call generate_cover_letter_content with CV, job, company data, and the chosen language parameter
    - SHOW the cover letter content to the user
+     * For German: show Betreff, Anrede, and all paragraphs including Grußformel
+     * For English: show opening/body/closing paragraphs as before
    - Ask for feedback or approval
    - After showing the cover letter, ALWAYS ask: "Ready to generate the document? I can create a PDF, Word document (.docx), or both formats. Which would you prefer?"
    - If user requests "both", "pdf and word", "both formats", or similar, generate BOTH formats
@@ -1440,10 +1636,10 @@ STANDARD WORKFLOW (alternative, simpler approach):
    - ONLY call generate_cover_letter_pdf and/or generate_cover_letter_docx after EXPLICIT approval
    - When calling generate_cover_letter_pdf or generate_cover_letter_docx, you MUST provide:
      * content_json: The output from generate_cover_letter_content
-     * output_filename: e.g., "firstname_lastname_cover_letter.pdf" or ".docx"
+     * output_filename: e.g., "firstname_lastname_cover_letter.pdf" or "firstname_lastname_anschreiben.pdf" for German
      * applicant_name: Extract from CV data (e.g., cv_data['name'])
      * applicant_contact: Format as "email | phone" from CV data (e.g., "john@email.com | (123) 456-7890")
-     * recipient_info: Extract from job data or use "Hiring Manager"
+     * recipient_info: Extract from job data or use "Hiring Manager" (for German, this will be used in the Anrede)
    - When generating both formats, call BOTH tools and include BOTH success messages in your response
 
 CRITICAL PRINCIPLES:
@@ -1474,6 +1670,10 @@ ENHANCED TOOLS REFERENCE:
 - decide_tailoring_strategy: Consumes the v2 CompatibilityReport and emits per-skill directives (inject_bridge_bullet, emphasize_skills_section, handle_missing_skills, amplify_outcomes, inject_keywords, reframe_domain, temper_seniority) — Step 3
 - select_prioritize_content: Selects top bullets per section with relevance scores, recommends section ordering and emphasis — Step 4
 - rewrite_enhance_content: Rewrites selected bullets with action verbs and job keywords; returns per-bullet confidence scores — Step 5
+- generate_cover_letter_content: Generates structured cover letter content. Accepts an optional language parameter:
+  language="english" (default) → standard English cover letter (opening/body/closing paragraphs)
+  language="german" → formal German Anschreiben in Sie-form (betreff, Einleitung, Hauptteil, Schlussteil, Grußformel)
+  Always ask the user which language they want before calling this tool.
 
 COMPATIBILITY THRESHOLDS:
 - LOW: < 0.5 - Many gaps, consider transferable skills
