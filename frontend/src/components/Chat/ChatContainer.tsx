@@ -1,7 +1,9 @@
-import { Message } from '@/types';
+import { Message, OrchestratorGateAction, OrchestratorGatePayload } from '@/types';
 import { ChatMessage } from './ChatMessage';
 import { ChatInput } from './ChatInput';
 import { EmptyState } from './EmptyState';
+import { ApprovalGate } from './ApprovalGate';
+import { ChoiceGate } from './ChoiceGate';
 
 interface ChatContainerProps {
   messages: Message[];
@@ -15,6 +17,14 @@ interface ChatContainerProps {
   onSendMessage: () => void;
   onClickUpload: () => void;
   sessionReady?: boolean;
+  // Orchestrator-only: when set, render the structured gate panel above the
+  // free-text input. Legacy writer chat leaves these unset and the UI behaves
+  // exactly as before.
+  pendingGate?: OrchestratorGatePayload | null;
+  onSubmitGateResolution?: (
+    action: OrchestratorGateAction,
+    opts?: { feedback?: string; choice?: string }
+  ) => void | Promise<void>;
 }
 
 export const ChatContainer = ({
@@ -29,6 +39,8 @@ export const ChatContainer = ({
   onSendMessage,
   onClickUpload,
   sessionReady = true,
+  pendingGate,
+  onSubmitGateResolution,
 }: ChatContainerProps) => {
   if (messages.length === 0) {
     return (
@@ -80,6 +92,25 @@ export const ChatContainer = ({
           </div>
         </div>
       </div>
+
+      {/* Structured gate panel (orchestrator mode only) */}
+      {pendingGate && onSubmitGateResolution && (
+        <div className="border-t border-slate-200 bg-slate-50 px-6 py-4 dark:border-slate-700 dark:bg-slate-900/40">
+          {pendingGate.kind === 'choice' ? (
+            <ChoiceGate
+              gate={pendingGate}
+              isLoading={isLoading}
+              onSubmit={onSubmitGateResolution}
+            />
+          ) : (
+            <ApprovalGate
+              gate={pendingGate}
+              isLoading={isLoading}
+              onSubmit={onSubmitGateResolution}
+            />
+          )}
+        </div>
+      )}
 
       {/* Input Area */}
       <ChatInput
