@@ -7,7 +7,13 @@ from fastapi.responses import FileResponse
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from app.api import cv_router, job_router, writer_router, audio_router
+from app.api import (
+    audio_router,
+    cv_router,
+    job_router,
+    orchestrator_router,
+    writer_router,
+)
 from app.services.generic_session_manager import get_session_manager
 
 
@@ -56,6 +62,7 @@ app.include_router(cv_router)
 app.include_router(job_router)
 app.include_router(writer_router)
 app.include_router(audio_router)
+app.include_router(orchestrator_router)
 
 # Configure file serving directory
 DATA_DIR = Path(__file__).parent.parent / "data"

@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import { ResumeUpload } from '@/components/ResumeUpload';
 import { JobInput } from '@/components/JobInput';
 import { HowItWorks } from '@/components/HowItWorks';
@@ -81,6 +82,10 @@ export const UploadSection = ({
   analysisStarted,
   canStartAnalysis,
 }: UploadSectionProps) => {
+  // Discovery flow is a future Phase 5/6 capability. The backend orchestrator
+  // already reserves the entry point (discovery_stub); the UI surfaces it as a
+  // disabled CTA so it is discoverable but not yet selectable.
+  const [showDiscoveryComingSoon, setShowDiscoveryComingSoon] = useState(false);
   return (
     <div className="flex flex-1 flex-col items-center justify-start">
       {/* Hero Section */}
@@ -102,8 +107,8 @@ export const UploadSection = ({
 
         {/* Mode Selection — shown before a flow is chosen */}
         {flowMode === null && (
-          <div className="mx-auto w-full max-w-3xl">
-            <div className="grid gap-6 sm:grid-cols-2">
+          <div className="mx-auto w-full max-w-5xl">
+            <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
               {/* Review my CV */}
               <button
                 onClick={() => onSetFlowMode('cv_only')}
@@ -159,7 +164,68 @@ export const UploadSection = ({
                   Match your CV to a specific job description and generate tailored application materials
                 </p>
               </button>
+
+              {/* Discover careers (Phase 5/6 - not yet available) */}
+              <button
+                type="button"
+                onClick={() => setShowDiscoveryComingSoon(true)}
+                aria-disabled="true"
+                title="Coming soon"
+                className="group relative flex cursor-not-allowed flex-col items-center rounded-2xl border-2 border-dashed border-slate-300 bg-white/60 p-8 text-left opacity-70 shadow-sm transition-all hover:opacity-90 dark:border-slate-700 dark:bg-slate-800/40"
+              >
+                <span className="absolute right-4 top-4 rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-medium text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">
+                  Coming soon
+                </span>
+                <div className="mb-5 rounded-full bg-slate-100 p-5 dark:bg-slate-700/40">
+                  <svg
+                    className="h-10 w-10 text-slate-500 dark:text-slate-400"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={1.5}
+                      d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"
+                    />
+                  </svg>
+                </div>
+                <h2 className="mb-2 text-xl font-semibold text-slate-700 dark:text-slate-300">
+                  Discover careers
+                </h2>
+                <p className="text-sm text-slate-500 dark:text-slate-400">
+                  Explore roles, industries, and trajectories that fit your skills - phase 5/6
+                </p>
+              </button>
             </div>
+
+            {showDiscoveryComingSoon && (
+              <div
+                role="status"
+                className="mx-auto mt-6 max-w-xl rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 shadow-sm dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-200"
+              >
+                The career-discovery experience isn&rsquo;t available yet. It&rsquo;s wired into
+                the orchestrator as a placeholder so the real implementation can drop in
+                without changing the API or the UI. For now, pick{' '}
+                <button
+                  type="button"
+                  className="underline underline-offset-2"
+                  onClick={() => onSetFlowMode('cv_only')}
+                >
+                  Review my CV
+                </button>{' '}
+                or{' '}
+                <button
+                  type="button"
+                  className="underline underline-offset-2"
+                  onClick={() => onSetFlowMode('job_tailoring')}
+                >
+                  Tailor to a job
+                </button>
+                .
+              </div>
+            )}
           </div>
         )}
 

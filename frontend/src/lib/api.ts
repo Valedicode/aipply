@@ -20,12 +20,10 @@ import {
   GenerateTailoredCVResponse,
   GenerateCoverLetterRequest,
   GenerateCoverLetterResponse,
-  WriterChatSessionInitRequest,
-  WriterChatSessionInitResponse,
-  WriterChatMessageRequest,
-  WriterChatMessageResponse,
-  ResumeSummaryRequest,
-  ResumeSummaryResponse,
+  OrchestratorStartRequest,
+  OrchestratorMessageRequest,
+  OrchestratorResponse,
+  OrchestratorStateResponse,
   TranscriptionRequest,
   TranscriptionResponse,
   TranslationRequest,
@@ -252,131 +250,48 @@ export async function generateCoverLetter(
   });
 }
 
+// Legacy Writer chat helpers (startWriterChat, sendWriterMessage,
+// generateResumeSummary) were removed during the orchestrator migration.
+// All chat traffic now goes through the orchestrator API below.
+
 // ============================================
-// Writer Chat API (New)
+// Orchestrator API (LangGraph backend)
 // ============================================
 
 /**
- * Start a new Writer chat session
+ * Start a new orchestrator session. Runs the graph until the first interrupt
+ * and returns the pending gate (if any).
  */
-export async function startWriterChat(
-  request: WriterChatSessionInitRequest
-): Promise<WriterChatSessionInitResponse> {
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 300000); // 5 minutes
-
-    const response = await fetch(`${API_BASE_URL}/writer/chat/start`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(request),
-      signal: controller.signal,
-    });
-
-    clearTimeout(timeoutId);
-
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      throw new APIError(
-        errorData.detail || errorData.error || 'Failed to start Writer chat',
-        response.status,
-        errorData.detail
-      );
-    }
-
-    return await response.json();
-  } catch (error) {
-    if (error instanceof APIError) {
-      throw error;
-    }
-    if (error instanceof Error && error.name === 'AbortError') {
-      throw new APIError(
-        'Request timed out. Please try again.',
-        0,
-        'Request timeout'
-      );
-    }
-    if (error instanceof TypeError || (error instanceof Error && (error.message.includes('fetch') || error.message.includes('ECONNRESET')))) {
-      throw new APIError(
-        'Cannot connect to backend server. Please ensure the backend is running at http://localhost:8000',
-        0,
-        'Network connection failed'
-      );
-    }
-    throw new APIError(
-      error instanceof Error ? error.message : 'Request failed',
-      0
-    );
-  }
-}
-
-/**
- * Send message to Writer agent
- */
-export async function sendWriterMessage(
-  request: WriterChatMessageRequest
-): Promise<WriterChatMessageResponse> {
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 300000); // 5 minutes
-
-    const response = await fetch(`${API_BASE_URL}/writer/chat/message`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(request),
-      signal: controller.signal,
-    });
-
-    clearTimeout(timeoutId);
-
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      throw new APIError(
-        errorData.detail || errorData.error || 'Failed to send message',
-        response.status,
-        errorData.detail
-      );
-    }
-
-    return await response.json();
-  } catch (error) {
-    if (error instanceof APIError) {
-      throw error;
-    }
-    if (error instanceof Error && error.name === 'AbortError') {
-      throw new APIError(
-        'Request timed out. Please try again.',
-        0,
-        'Request timeout'
-      );
-    }
-    if (error instanceof TypeError || (error instanceof Error && (error.message.includes('fetch') || error.message.includes('ECONNRESET')))) {
-      throw new APIError(
-        'Cannot connect to backend server. Please ensure the backend is running at http://localhost:8000',
-        0,
-        'Network connection failed'
-      );
-    }
-    throw new APIError(
-      error instanceof Error ? error.message : 'Request failed',
-      0
-    );
-  }
-}
-
-/**
- * Generate resume summary
- */
-export async function generateResumeSummary(
-  request: ResumeSummaryRequest
-): Promise<ResumeSummaryResponse> {
-  return apiFetch<ResumeSummaryResponse>('/writer/summarize-resume', {
+export async function orchestratorStart(
+  request: OrchestratorStartRequest
+): Promise<OrchestratorResponse> {
+  return apiFetch<OrchestratorResponse>('/orchestrator/start', {
     method: 'POST',
     body: JSON.stringify(request),
+  });
+}
+
+/**
+ * Resume the orchestrator with either a structured gate resolution or a free
+ * chat turn. Returns the next narration and the next pending gate.
+ */
+export async function orchestratorMessage(
+  request: OrchestratorMessageRequest
+): Promise<OrchestratorResponse> {
+  return apiFetch<OrchestratorResponse>('/orchestrator/message', {
+    method: 'POST',
+    body: JSON.stringify(request),
+  });
+}
+
+/**
+ * Debug snapshot of a session's current state. Used for recovery/refresh.
+ */
+export async function orchestratorState(
+  sessionId: string
+): Promise<OrchestratorStateResponse> {
+  return apiFetch<OrchestratorStateResponse>(`/orchestrator/state/${sessionId}`, {
+    method: 'GET',
   });
 }
 

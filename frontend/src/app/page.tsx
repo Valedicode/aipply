@@ -9,7 +9,7 @@ import { ChatContainer } from '@/components/Chat/ChatContainer';
 import { useTheme } from '@/hooks/useTheme';
 import { useFileUpload } from '@/hooks/useFileUpload';
 import { useJobInput } from '@/hooks/useJobInput';
-import { useWriterChat } from '@/hooks/useWriterChat';
+import { useOrchestratorChat } from '@/hooks/useOrchestratorChat';
 
 export default function Home() {
   const { isDark, toggleTheme } = useTheme();
@@ -66,7 +66,9 @@ export default function Home() {
     }
   });
   
-  // Writer chat - Direct interaction with Writer agent
+  // Chat backend - LangGraph orchestrator at /api/orchestrator/*.
+  const orchestratorChat = useOrchestratorChat({ cvData, jobData, flowMode });
+
   const {
     sessionId,
     isInitializing,
@@ -77,16 +79,14 @@ export default function Home() {
     setInputText,
     isLoading,
     chatError,
+    pendingGate,
+    submitGateResolution,
     textareaRef,
     messagesEndRef,
     handleSendMessage,
     handleKeyDown,
     initializeSession,
-  } = useWriterChat({
-    cvData,
-    jobData,
-    flowMode,
-  });
+  } = orchestratorChat;
 
   // Handlers for new functionality
   const handleSetFlowMode = (mode: 'cv_only' | 'job_tailoring') => {
@@ -302,6 +302,8 @@ export default function Home() {
                 onSendMessage={handleSendMessage}
                 onClickUpload={handleClickUpload}
                 sessionReady={!!sessionId && !isInitializing}
+                pendingGate={pendingGate}
+                onSubmitGateResolution={submitGateResolution}
               />
             </div>
           )}

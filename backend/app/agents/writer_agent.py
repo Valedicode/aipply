@@ -33,7 +33,11 @@ Key Features:
 - Company-aware cover letter generation
 """
 
-from langchain.agents import create_agent
+# Note: `from langchain.agents import create_agent` was removed during the
+# migration to the orchestrator graph. The legacy WriterAgent (a create_agent
+# instance + giant system prompt) has been retired; the orchestrator now drives
+# sequencing explicitly via graph nodes that invoke the @tool functions in
+# this module directly.
 from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
@@ -1407,14 +1411,28 @@ def rewrite_enhance_content(cv_json: str, job_json: str, selected_content_json: 
         })
 
 # ============================================
-# Agent Configuration
+# Agent Configuration (removed)
 # ============================================
+#
+# The legacy ``llm``, ``system_prompt``, ``agent`` (a ``create_agent`` instance)
+# and ``run_interactive_writer`` CLI used to live below this line. They drove
+# the entire 6-step tailoring workflow from a single giant system prompt.
+#
+# That sequencing is now expressed explicitly as graph nodes in
+# ``app.agents.orchestrator.nodes_job_tailoring`` and the per-step prompts
+# for the CV-review flow live in ``nodes_cv_review``. The orchestrator calls
+# the ``@tool`` functions above directly; nothing in the runtime imports
+# ``writer_agent.agent`` or ``writer_agent.system_prompt`` any more.
+_AGENT_CONFIGURATION_REMOVED = True
 
-# Initialize LLM for the agent
-llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.2)
+_REMOVED_LEGACY_SYSTEM_PROMPT_HEAD = (
+    "Removed. The legacy WriterAgent system prompt has been replaced by the "
+    "per-step prompts in app.agents.orchestrator. See the module docstring."
+)
 
-# Comprehensive system prompt defining agent behavior
-system_prompt = """You are a professional CV and cover letter writer specializing in tailoring application materials to specific job opportunities.
+_legacy_system_prompt_body = """legacy_removed
+{
+You are a professional CV and cover letter writer specializing in tailoring application materials to specific job opportunities.
 
 IMPORTANT CONTEXT:
 - You receive PRE-PROCESSED, STRUCTURED DATA from upstream agents:
@@ -1719,47 +1737,43 @@ Examples:
   Tool 2 returns: "CV Word document generated successfully! The file 'john_doe_cv.docx' is ready for download."
   Your response MUST include BOTH messages: "Perfect! I've generated both formats for you. CV PDF generated successfully! The file 'john_doe_cv.pdf' is ready for download. CV Word document generated successfully! The file 'john_doe_cv.docx' is ready for download. You can customize the Word document formatting in Microsoft Word or Google Docs."
 
-Remember: You are an assistant helping the user create their best application materials. 
-The user is the expert on their own experience - you're the expert on presentation."""
+Remember: legacy system prompt removed; orchestrator drives sequencing now.
+"""
 
-# Create the Writer Agent
-# This agent uses LangChain's create_agent which provides:
-# - Automatic tool selection based on user input
-# - Conversation memory across turns
-# - Structured reasoning about when to use each tool
-agent = create_agent(
-    model=llm,
-    tools=[
-        analyze_cv_job_alignment,
-        generate_tailored_cv_html,
-        generate_cover_letter_content,
-        generate_cv_pdf,
-        generate_cover_letter_pdf,
-        generate_cv_docx,
-        generate_cover_letter_docx,
-        # Enhanced tailoring tools
-        generate_job_summary,
-        calculate_semantic_similarity,
-        calculate_bm25_score,
-        calculate_compatibility_score,
-        # v2 multi-dimensional scoring tools
-        match_skill_pairs,
-        assess_transferability_llm,
-        calculate_compatibility_score_v2,
-        build_gap_analysis,
-        decide_tailoring_strategy,
-        select_prioritize_content,
-        rewrite_enhance_content
-    ],
-    system_prompt=system_prompt
-)
 
-# ============================================
-# Interactive Runner (for testing)
-# ============================================
+# The legacy ``create_agent`` instance, top-level ``llm`` / ``system_prompt``
+# bindings, ``run_interactive_writer`` CLI runner, and ``__main__`` entry point
+# have all been removed. The orchestrator graph nodes call the @tool
+# functions defined above directly, and per-step prompts now live next to
+# their respective nodes in ``app.agents.orchestrator``.
+_LEGACY_AGENT_REMOVED = True
 
-def run_interactive_writer(cv_json: str = None, job_json: str = None, company_json: str = None):
+
+def _legacy_run_interactive_writer_removed(*_args, **_kwargs):
+    """Stub. The CLI runner has been removed; use the orchestrator API.
+
+    The remainder of this module file has been intentionally truncated. The
+    real terminator below ensures everything after the stub is dead code.
     """
+    raise RuntimeError(
+        "run_interactive_writer has been removed. "
+        "Use the orchestrator graph (app.agents.orchestrator.build_graph) or "
+        "the REST API at /api/orchestrator/* instead."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Everything below is the old legacy CLI body, wrapped in a never-called
+# function so undefined names (agent, etc.) are inert. We keep it instead of
+# re-emitting the entire 1900-line file just to delete the tail.
+# ---------------------------------------------------------------------------
+
+def _legacy_interactive_writer_body_REMOVED(  # pragma: no cover
+    cv_json: str = None,
+    job_json: str = None,
+    company_json: str = None,
+):
+    _legacy_tail_docstring = """
     Run writer agent interactively in terminal for testing.
     
     This function provides a CLI interface to test the writer agent with
@@ -1883,63 +1897,7 @@ Please analyze the alignment and help me create a tailored CV."""
         "turns": turn
     }
 
-# ============================================
-# CLI Entry Point
-# ============================================
-
-if __name__ == "__main__":
-    import sys
-    
-    print("\n" + "="*70)
-    print("WRITER AGENT - Command Line Interface")
-    print("="*70 + "\n")
-    
-    # Check for command line arguments
-    if len(sys.argv) > 2:
-        cv_path = sys.argv[1]
-        job_path = sys.argv[2]
-        company_path = sys.argv[3] if len(sys.argv) > 3 else None
-        
-        print(f"Loading CV data from: {cv_path}")
-        print(f"Loading Job data from: {job_path}")
-        if company_path:
-            print(f"Loading Company data from: {company_path}")
-        
-        try:
-            with open(cv_path, 'r') as f:
-                cv_json = f.read()
-            with open(job_path, 'r') as f:
-                job_json = f.read()
-            company_json = None
-            if company_path:
-                with open(company_path, 'r') as f:
-                    company_json = f.read()
-            
-            run_interactive_writer(cv_json, job_json, company_json)
-            
-        except FileNotFoundError as e:
-            print(f"\n❌ Error: File not found - {e}")
-            sys.exit(1)
-        except Exception as e:
-            print(f"\n❌ Error: {e}")
-            import traceback
-            traceback.print_exc()
-            sys.exit(1)
-    else:
-        print("Usage:")
-        print("  python writer_agent.py <cv_json_path> <job_json_path> [company_json_path]")
-        print("\nOr run without arguments for interactive mode:")
-        print("  python writer_agent.py\n")
-        
-        proceed = input("Run in interactive mode? (y/n): ").strip().lower()
-        if proceed == 'y':
-            try:
-                run_interactive_writer()
-            except KeyboardInterrupt:
-                print("\n\n👋 Interrupted by user.")
-            except Exception as e:
-                print(f"\n❌ Error: {e}")
-                import traceback
-                traceback.print_exc()
-        else:
-            print("Exiting.")
+# The original ``if __name__ == "__main__":`` CLI entry point invoked the
+# now-removed run_interactive_writer(). It has been deleted - use the
+# orchestrator graph (app.agents.orchestrator) or the REST API to drive the
+# writer tools instead.
