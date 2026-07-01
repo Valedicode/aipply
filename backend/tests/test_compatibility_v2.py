@@ -254,11 +254,13 @@ def test_compatibility_score_v2_invalid_json():
 # Test 8: writer_agent's tools list still contains all 8 scoring tool names
 # ---------------------------------------------------------------------------
 
-def test_writer_agent_tools_list_unchanged():
+def test_writer_agent_scoring_tools_importable():
     """
-    Import the agent from writer_agent and assert that all scoring tools
-    are present in its tools list. This proves the refactor didn't drop
-    any tool from the LangChain agent registration.
+    Each scoring tool is still importable as a module-level @tool from
+    ``app.agents.writer_agent``. The legacy ``agent`` (a create_agent
+    instance) was retired during the orchestrator migration; the orchestrator
+    invokes these tools directly, so this test now checks the public surface
+    rather than the create_agent binding.
     """
     expected_scoring_tools = {
         "calculate_semantic_similarity",
@@ -271,12 +273,16 @@ def test_writer_agent_tools_list_unchanged():
         "decide_tailoring_strategy",
     }
 
-    # Import lazily to avoid any module-level side effects during test collection
-    from app.agents.writer_agent import agent as writer_agent  # noqa: PLC0415
+    import app.agents.writer_agent as writer_agent  # noqa: PLC0415
 
-    # create_agent returns a LangGraph CompiledStateGraph; tools live on the
-    # "tools" node's bound runnable, not on agent.tools.
-    tools_node = writer_agent.nodes["tools"]
-    tool_names = set(tools_node.bound._tools_by_name.keys())
-    missing = expected_scoring_tools - tool_names
-    assert not missing, f"Missing tools in writer_agent: {missing}"
+    missing = set()
+    for name in expected_scoring_tools:
+        if not hasattr(writer_agent, name):
+            missing.add(name)
+            continue
+        attr = getattr(writer_agent, name)
+        # Either a bare callable (plain function) or a LangChain tool object
+        # exposing .invoke() / .run() is acceptable.
+        if not (callable(attr) or hasattr(attr, "invoke") or hasattr(attr, "run")):
+            missing.add(name)
+    assert not missing, f"Missing tools in writer_agent module: {missing}"
