@@ -176,53 +176,13 @@ export interface CompanyResearchRequest {
 }
 
 // ============================================
-// Writer Chat Types (New)
+// Shared downloadable file metadata
 // ============================================
-
-export interface WriterChatSessionInitRequest {
-  cv_data: ResumeInfo;
-  job_data?: JobRequirements;
-  mode: 'resume_refinement' | 'job_tailoring';
-}
-
-export interface WriterChatSessionInitResponse {
-  success: boolean;
-  session_id: string;
-  initial_message: string;
-  greeting_message?: string;
-  summary_message?: string;
-  message: string;
-}
-
-export interface WriterChatMessageRequest {
-  session_id: string;
-  user_message: string;
-}
 
 export interface DownloadableFile {
   filename: string;
   file_type: string;
   download_url: string;
-}
-
-export interface WriterChatMessageResponse {
-  success: boolean;
-  assistant_message: string;
-  requires_approval: boolean;
-  preview_content?: string | null;
-  generated_files?: DownloadableFile[] | null;
-  message: string;
-}
-
-export interface ResumeSummaryRequest {
-  cv_data: ResumeInfo;
-}
-
-export interface ResumeSummaryResponse {
-  success: boolean;
-  summary: string;
-  suggestions?: string[] | null;
-  message: string;
 }
 
 // ============================================
@@ -296,6 +256,65 @@ export interface TranslationResponse {
   segments?: TranscriptionSegment[] | null;
   words?: TranscriptionWord[] | null;
   message: string;
+}
+
+// ============================================
+// Orchestrator Types (LangGraph backend)
+// ============================================
+
+export type OrchestratorFlow = 'job_tailoring' | 'cv_review' | 'discovery';
+
+export type OrchestratorGateKind = 'approval' | 'choice';
+
+export type OrchestratorGateAction = 'approve' | 'reject' | 'edit' | 'choose';
+
+export interface OrchestratorGatePayload {
+  step: string;
+  kind: OrchestratorGateKind;
+  narration: string;
+  preview: Record<string, unknown>;
+  allowed_actions: OrchestratorGateAction[];
+  choices?: string[] | null;
+}
+
+export interface OrchestratorGateResolution {
+  action: OrchestratorGateAction;
+  feedback?: string;
+  choice?: string;
+}
+
+export interface OrchestratorStartRequest {
+  flow: OrchestratorFlow;
+  cv_data: ResumeInfo;
+  job_data?: JobRequirements;
+  company_data?: CompanyInfo;
+}
+
+export interface OrchestratorMessageRequest {
+  session_id: string;
+  kind: 'chat' | 'gate_resolution';
+  text?: string;
+  resolution?: OrchestratorGateResolution;
+}
+
+export interface OrchestratorResponse {
+  success: boolean;
+  session_id: string;
+  narration: string;
+  pending_gate: OrchestratorGatePayload | null;
+  generated_files: DownloadableFile[];
+  done: boolean;
+  message: string;
+}
+
+export interface OrchestratorStateResponse {
+  success: boolean;
+  session_id: string;
+  flow?: string | null;
+  pending_gate: OrchestratorGatePayload | null;
+  generated_files: DownloadableFile[];
+  last_narration: string;
+  done: boolean;
 }
 
 // ============================================
