@@ -5,7 +5,7 @@ This module defines all Pydantic models used for API communication.
 These models provide validation, serialization, and documentation for the API.
 """
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from typing import Optional, List, Dict, Any, Literal, Union
 
 
@@ -22,8 +22,34 @@ class CVUploadRequest(BaseModel):
     )
 
 
+class ExperienceEntry(BaseModel):
+    """One work-experience entry. OpenAI structured output requires explicit
+    fields with ``extra='forbid'`` — ``Dict[str, Any]`` unions are rejected."""
+    model_config = ConfigDict(extra="forbid")
+
+    position: Optional[str] = Field(default=None, description="Job title or role")
+    company: Optional[str] = Field(default=None, description="Employer name")
+    duration: Optional[str] = Field(default=None, description="Employment dates or duration")
+    responsibilities: List[str] = Field(
+        default_factory=list,
+        description="Bullet points describing achievements in this role",
+    )
+
+
+class ProjectEntry(BaseModel):
+    """One project entry."""
+    model_config = ConfigDict(extra="forbid")
+
+    name: Optional[str] = Field(default=None, description="Project name")
+    description: Optional[str] = Field(default=None, description="Project description")
+    technologies: List[str] = Field(default_factory=list, description="Technologies used")
+    outcomes: List[str] = Field(default_factory=list, description="Outcomes or achievements")
+
+
 class ResumeInfo(BaseModel):
     """Structured resume information extracted from CV."""
+    model_config = ConfigDict(extra="forbid")
+
     name: str = Field(description="Full name of the applicant")
     email: str = Field(description="Email address")
     phone: str = Field(description="Phone number")
@@ -45,11 +71,11 @@ class ResumeInfo(BaseModel):
     )
     skills: List[str] = Field(description="List of professional skills")
     education: List[str] = Field(description="Educational qualifications")
-    experience: List[Union[Dict[str, Any], str]] = Field(
-        description="Work experience entries. Each entry may be a plain string or a structured dict with keys such as 'position', 'company', 'duration', 'responsibilities'."
+    experience: List[ExperienceEntry] = Field(
+        description="Work experience entries with position, company, duration, and responsibilities."
     )
-    projects: List[Union[Dict[str, Any], str]] = Field(
-        description="Project entries. Each entry may be a plain string or a structured dict with keys such as 'name', 'description', 'technologies', 'outcomes'."
+    projects: List[ProjectEntry] = Field(
+        description="Project entries with name, description, technologies, and outcomes."
     )
     leadership_activities: Optional[List[str]] = Field(
         default=[],
@@ -415,37 +441,8 @@ class GenerateCoverLetterResponse(BaseModel):
 
 
 # ============================================
-# Writer Chat Models (Conversational Interface)
+# Shared file-output model
 # ============================================
-
-class WriterChatSessionInitRequest(BaseModel):
-    """Request to start a new Writer chat session."""
-    cv_data: Dict[str, Any] = Field(description="Resume data from CV agent")
-    job_data: Optional[Dict[str, Any]] = Field(
-        default=None,
-        description="Job requirements from job agent (optional for resume refinement mode)"
-    )
-    mode: Literal["resume_refinement", "job_tailoring"] = Field(
-        default="resume_refinement",
-        description="Chat mode: resume_refinement (CV only) or job_tailoring (CV + job)"
-    )
-
-
-class WriterChatSessionInitResponse(BaseModel):
-    """Response when starting a Writer chat session."""
-    success: bool
-    session_id: str = Field(description="Session ID for subsequent chat messages")
-    initial_message: str = Field(description="Writer's initial greeting/summary")
-    greeting_message: Optional[str] = Field(default=None, description="Separate greeting message")
-    summary_message: Optional[str] = Field(default=None, description="Separate summary message")
-    message: str = Field(description="Status message")
-
-
-class WriterChatMessageRequest(BaseModel):
-    """Request to send a message in Writer chat."""
-    session_id: str = Field(description="Session identifier from init")
-    user_message: str = Field(description="User's message to the Writer agent")
-
 
 class GeneratedFile(BaseModel):
     """Metadata for a generated file."""
@@ -454,39 +451,101 @@ class GeneratedFile(BaseModel):
     download_url: str = Field(description="URL to download the file")
 
 
-class WriterChatMessageResponse(BaseModel):
-    """Response from Writer agent."""
+# ============================================
+# Orchestrator API Models (LangGraph-driven flow)
+# ============================================
+
+class OrchestratorGatePayload(BaseModel):
+    """Public shape of a pending human-in-the-loop gate."""
+    step: str = Field(description="Stable gate identifier")
+    kind: Literal["approval", "choice"] = Field(description="Gate kind")
+    narration: str = Field(description="Assistant text for this gate")
+    preview: Dict[str, Any] = Field(default_factory=dict, description="Structured artifact under review")
+    allowed_actions: List[Literal["approve", "reject", "edit", "choose"]] = Field(
+        description="Actions the client may submit back"
+    )
+    choices: Optional[List[str]] = Field(
+        default=None,
+        description="Valid values for action='choose'. Populated only when kind='choice'."
+    )
+
+
+class OrchestratorGateResolution(BaseModel):
+    """Client reply to a pending OrchestratorGatePayload."""
+    action: Literal["approve", "reject", "edit", "choose"] = Field(
+        description="Selected action. Must be in the gate's allowed_actions."
+    )
+    feedback: Optional[str] = Field(
+        default=None,
+        description="Free-text edit instructions (required when action='edit')."
+    )
+    choice: Optional[str] = Field(
+        default=None,
+        description="Selected option for kind='choice' gates (required when action='choose')."
+    )
+
+
+class OrchestratorStartRequest(BaseModel):
+    """Initialise a new orchestrator session and run until the first gate."""
+    flow: Literal["job_tailoring", "cv_review", "discovery"] = Field(
+        description="Which entry branch of the orchestrator graph to enter."
+    )
+    cv_data: Dict[str, Any] = Field(description="Resume data from CV agent (ResumeInfo dict)")
+    job_data: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Job requirements from job agent (required for job_tailoring)."
+    )
+    company_data: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Optional company info from company research."
+    )
+
+
+class OrchestratorMessageRequest(BaseModel):
+    """Send either a free-text chat turn or a structured gate resolution."""
+    session_id: str = Field(description="Session identifier from /start")
+    kind: Literal["chat", "gate_resolution"] = Field(
+        description="'gate_resolution' resumes the graph from its interrupt; 'chat' is reserved for free-text turns outside any gate."
+    )
+    text: Optional[str] = Field(
+        default=None,
+        description="Free-text message (required when kind='chat')."
+    )
+    resolution: Optional[OrchestratorGateResolution] = Field(
+        default=None,
+        description="Structured gate reply (required when kind='gate_resolution')."
+    )
+
+
+class OrchestratorResponse(BaseModel):
+    """Response from /start and /message - one shape for both."""
     success: bool
-    assistant_message: str = Field(description="Writer's response")
-    requires_approval: bool = Field(
+    session_id: str
+    narration: str = Field(default="", description="Latest assistant text from the graph.")
+    pending_gate: Optional[OrchestratorGatePayload] = Field(
+        default=None,
+        description="Populated when the graph is paused on a gate; null when the run is complete."
+    )
+    generated_files: List[GeneratedFile] = Field(
+        default_factory=list,
+        description="Files produced by the run so far."
+    )
+    done: bool = Field(
         default=False,
-        description="Whether user approval is needed before proceeding"
+        description="True when the graph has reached END."
     )
-    preview_content: Optional[str] = Field(
-        default=None,
-        description="Preview content for user review (e.g., tailoring plan)"
-    )
-    generated_files: Optional[List[GeneratedFile]] = Field(
-        default=None,
-        description="List of files generated in this response (for download)"
-    )
-    message: str = Field(description="Status message")
+    message: str = Field(default="ok", description="Status message")
 
 
-class ResumeSummaryRequest(BaseModel):
-    """Request to generate resume summary."""
-    cv_data: Dict[str, Any] = Field(description="Resume data from CV agent")
-
-
-class ResumeSummaryResponse(BaseModel):
-    """Response with resume summary."""
+class OrchestratorStateResponse(BaseModel):
+    """Debug snapshot of the current state of a session."""
     success: bool
-    summary: str = Field(description="Neutral summary of the resume")
-    suggestions: Optional[List[str]] = Field(
-        default=None,
-        description="Optional suggestions for improvement"
-    )
-    message: str = Field(description="Status message")
+    session_id: str
+    flow: Optional[str] = None
+    pending_gate: Optional[OrchestratorGatePayload] = None
+    generated_files: List[GeneratedFile] = Field(default_factory=list)
+    last_narration: str = ""
+    done: bool = False
 
 
 # ============================================
