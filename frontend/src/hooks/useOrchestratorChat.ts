@@ -6,9 +6,10 @@
  *  - The graph pauses on structured gates; the hook exposes the latest
  *    `pendingGate` so the UI can render an ApprovalGate or ChoiceGate.
  *  - `submitGateResolution(action, opts)` resumes the graph through the
- *    corresponding REST call. Free-text chat (`handleSendMessage`) is reserved
- *    for the cv_review branch and is a no-op against the job-tailoring flow
- *    while a gate is pending - the backend tells the user to resolve the gate.
+ *    corresponding REST call. Free-text chat (`handleSendMessage`) is folded
+ *    in by the backend as 'edit' feedback for the currently pending gate when
+ *    the gate allows edits; otherwise the backend replies with the set of
+ *    actions that are actually available.
  *
  * Shape matches useWriterChat closely so `page.tsx` can swap one for the other
  * behind a feature flag without UI churn.
