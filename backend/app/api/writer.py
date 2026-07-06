@@ -23,7 +23,6 @@ from app.agents.writer_agent import (
     generate_cover_letter_content,
     generate_cover_letter_pdf,
     generate_cv_pdf,
-    generate_tailored_cv_html,
 )
 from app.models.schemas import (
     CoverLetterContent,
@@ -142,18 +141,19 @@ async def generate_cv(request: GenerateTailoredCVRequest):
             )
 
         cv_json = json.dumps(request.cv_data)
-        plan_json = json.dumps(request.tailoring_plan)
-
-        html_content = generate_tailored_cv_html.invoke({
-            "cv_json": cv_json,
-            "tailoring_plan_json": plan_json,
-        })
+        section_order = request.tailoring_plan.get("section_order", [])
+        if not isinstance(section_order, list):
+            section_order = []
 
         applicant_name = request.cv_data.get('name', 'Applicant')
+        from app.services.latex_renderer import render_cv_tex
+        latex_preview = render_cv_tex(request.cv_data, section_order=section_order)
+
         pdf_result = generate_cv_pdf.invoke({
-            "html_content": html_content,
+            "cv_json": cv_json,
             "output_filename": request.output_filename,
             "applicant_name": applicant_name,
+            "section_order_json": json.dumps(section_order),
         })
 
         if "Error" in pdf_result:
@@ -168,7 +168,7 @@ async def generate_cv(request: GenerateTailoredCVRequest):
         return GenerateTailoredCVResponse(
             success=True,
             pdf_path=pdf_path,
-            html_preview=html_content[:500] + "..." if len(html_content) > 500 else html_content,
+            latex_preview=latex_preview[:500] + "..." if len(latex_preview) > 500 else latex_preview,
             message=pdf_result
         )
 
@@ -287,7 +287,6 @@ async def writer_health():
         "agent": "writer",
         "available_tools": [
             "analyze_cv_job_alignment",
-            "generate_tailored_cv_html",
             "generate_cover_letter_content",
             "generate_cv_pdf",
             "generate_cover_letter_pdf",

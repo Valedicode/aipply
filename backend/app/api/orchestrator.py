@@ -76,6 +76,21 @@ def _files_from_state(state_values: dict[str, Any]) -> list[GeneratedFile]:
     return [GeneratedFile(**f) for f in raw if isinstance(f, dict)]
 
 
+def _pending_gate_from_snapshot(snapshot: Any) -> OrchestratorGatePayload | None:
+    """Extract the pending gate directly from a graph state snapshot's tasks."""
+    if snapshot is None:
+        return None
+    for task in snapshot.tasks or []:
+        for task_interrupt in task.interrupts or []:
+            value = task_interrupt.value if hasattr(task_interrupt, "value") else None
+            if isinstance(value, dict):
+                try:
+                    return OrchestratorGatePayload.model_validate(value)
+                except Exception:
+                    continue
+    return None
+
+
 def _snapshot_response(
     *,
     session_id: str,
@@ -168,8 +183,9 @@ async def orchestrator_start(
     summary="Send a message to the orchestrator",
     description=(
         "Resume a paused session with a structured gate resolution, or push a "
-        "free-text chat turn. Returns the next narration and the next pending "
-        "gate (if any)."
+        "free-text chat turn (folded in as 'edit' feedback for the current "
+        "gate when the gate allows edits). Returns the next narration and the "
+        "next pending gate (if any)."
     ),
 )
 async def orchestrator_message(
@@ -221,24 +237,50 @@ async def orchestrator_message(
             detail="kind='chat' requires non-empty 'text'.",
         )
 
-    # The current graph nodes only listen at interrupts; free-text chat turns
-    # outside of a gate are reserved for the CV-review branch that lands in a
-    # later migration step. For now we acknowledge and stay paused.
-    return OrchestratorResponse(
-        success=True,
-        session_id=request.session_id,
-        narration=(
-            "Free-text chat outside of an approval gate is not yet supported "
-            "by this flow. Please resolve the pending gate first."
-        ),
-        pending_gate=_pending_gate_from_invoke_result(
-            # Re-derive the gate by introspecting the snapshot's task descriptors.
-            {"__interrupt__": list(snapshot.tasks[0].interrupts) if snapshot.tasks else []}
-        ),
-        generated_files=_files_from_state(snapshot.values),
-        done=False,
-        message="ok",
-    )
+    pending = _pending_gate_from_snapshot(snapshot)
+
+    if pending is None:
+        # Nothing to resume - the run already reached END.
+        return OrchestratorResponse(
+            success=True,
+            session_id=request.session_id,
+            narration="This session has already finished. Start a new session to continue.",
+            pending_gate=None,
+            generated_files=_files_from_state(snapshot.values),
+            done=True,
+            message="ok",
+        )
+
+    if "edit" not in pending.allowed_actions:
+        # This gate only supports approve/reject/choose - free text can't be
+        # folded in automatically, so surface the allowed actions instead.
+        actions = " / ".join(pending.allowed_actions)
+        return OrchestratorResponse(
+            success=True,
+            session_id=request.session_id,
+            narration=(
+                f"This step doesn't accept free-form notes - please use one of the "
+                f"available actions instead ({actions})."
+            ),
+            pending_gate=pending,
+            generated_files=_files_from_state(snapshot.values),
+            done=False,
+            message="ok",
+        )
+
+    # Treat the free-text message as edit feedback for the currently pending
+    # gate, so users can just type what they want changed instead of clicking
+    # "Edit" first.
+    try:
+        internal = GateResolution.model_validate({"action": "edit", "feedback": request.text.strip()})
+        result = graph.invoke(Command(resume=internal.model_dump()), config=config)
+    except GraphInterrupt as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Graph raised an unhandled interrupt: {exc}",
+        ) from exc
+
+    return _snapshot_response(session_id=request.session_id, invoke_result=result)
 
 
 # --------------------------------------------------------------------------- #
@@ -265,18 +307,7 @@ async def orchestrator_state(
     state_values = snapshot.values
     # Pending gate is exposed via snapshot.tasks[].interrupts; when there are
     # no tasks left the run is done.
-    pending: OrchestratorGatePayload | None = None
-    for task in snapshot.tasks or []:
-        for interrupt in task.interrupts or []:
-            value = interrupt.value if hasattr(interrupt, "value") else None
-            if isinstance(value, dict):
-                try:
-                    pending = OrchestratorGatePayload.model_validate(value)
-                    break
-                except Exception:
-                    continue
-        if pending is not None:
-            break
+    pending = _pending_gate_from_snapshot(snapshot)
 
     return OrchestratorStateResponse(
         success=True,
