@@ -27,13 +27,6 @@ export const DownloadButton = ({ file }: DownloadButtonProps) => {
   };
 
   const getFileIcon = () => {
-    if (file.file_type === 'docx' || file.filename.toLowerCase().endsWith('.docx')) {
-      return (
-        <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-        </svg>
-      );
-    }
     if (file.file_type === 'cover_letter') {
       return (
         <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -49,15 +42,9 @@ export const DownloadButton = ({ file }: DownloadButtonProps) => {
   };
 
   const getFileLabel = () => {
-    const isWordDoc = file.file_type === 'docx' || file.filename.toLowerCase().endsWith('.docx');
-    const isCoverLetter = file.file_type === 'cover_letter' || file.filename.toLowerCase().includes('cover');
-    
-    if (isWordDoc && isCoverLetter) {
-      return 'Cover Letter (Word)';
-    }
-    if (isWordDoc) {
-      return 'CV/Resume (Word)';
-    }
+    const isCoverLetter =
+      file.file_type === 'cover_letter' || file.filename.toLowerCase().includes('cover');
+
     if (isCoverLetter) {
       return 'Cover Letter (PDF)';
     }
@@ -88,13 +75,13 @@ export const DownloadButton = ({ file }: DownloadButtonProps) => {
           </>
         )}
       </button>
-      
+
       {error && (
         <div className="mt-2 text-xs text-red-600 dark:text-red-400">
           {error}
         </div>
       )}
-      
+
       <div className="mt-1.5 flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
         {getFileIcon()}
         <span className="truncate max-w-[200px]">{file.filename}</span>
@@ -102,4 +89,3 @@ export const DownloadButton = ({ file }: DownloadButtonProps) => {
     </div>
   );
 };
-
