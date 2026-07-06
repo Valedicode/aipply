@@ -1,0 +1,40 @@
+\documentclass[12pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[ngerman]{babel}
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{setspace}
+\usepackage{parskip}
+
+\setlength{\parindent}{0pt}
+\onehalfspacing
+
+\begin{document}
+
+{\large\bfseries {{ applicant_name | latex_escape }} \par}
+{{ applicant_contact | latex_escape }} \par
+
+\vspace{1.5em}
+{{ current_date | latex_escape }} \par
+
+{% if betreff %}
+\vspace{1.5em}
+\textbf{Betreff:} {{ betreff | latex_escape }} \par
+{% endif %}
+
+\vspace{1.5em}
+{{ salutation | latex_escape }} \par
+
+\vspace{1em}
+{% for paragraph in paragraphs %}
+{{ paragraph | latex_escape }} \par
+\vspace{0.8em}
+{% endfor %}
+
+\vspace{1em}
+{{ grussformel | latex_escape }} \par
+
+\vspace{2.5em}
+{{ applicant_name | latex_escape }} \par
+
+\end{document}
