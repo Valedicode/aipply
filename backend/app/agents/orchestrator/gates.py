@@ -46,7 +46,7 @@ class GatePayload(BaseModel):
         ...,
         description=(
             "Stable identifier for the gate, e.g. 'approve_selection', "
-            "'approve_rewrite', 'export_format'. Used by the frontend to "
+            "'approve_rewrite'. Used by the frontend to "
             "decide which preview component to render."
         ),
     )
