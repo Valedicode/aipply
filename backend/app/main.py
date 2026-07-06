@@ -154,11 +154,11 @@ async def download_file(filename: str):
                 detail="Invalid filename. Filename cannot contain path separators or '..'."
             )
         
-        # Security: Only allow PDF and DOCX files
-        if not (filename.lower().endswith('.pdf') or filename.lower().endswith('.docx')):
+        # Security: Only allow PDF files
+        if not filename.lower().endswith('.pdf'):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Only PDF and Word (.docx) files can be downloaded."
+                detail="Only PDF files can be downloaded."
             )
         
         # Construct file path
@@ -185,11 +185,7 @@ async def download_file(filename: str):
                 detail="Access denied."
             )
         
-        # Determine media type based on file extension
-        if filename.lower().endswith('.docx'):
-            media_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-        else:
-            media_type = "application/pdf"
+        media_type = "application/pdf"
         
         # Return file
         return FileResponse(
