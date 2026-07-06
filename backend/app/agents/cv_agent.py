@@ -84,7 +84,12 @@ def extract_resume_info(pdf_path: str = "", pdf_bytes: bytes = b"") -> str:
     prompt = ChatPromptTemplate.from_messages([
         ("system", "Extract all information from the resume text. Be thorough and capture all details. "
          "Include: contact information (email, phone, location), professional links (GitHub, LinkedIn, portfolio/website URLs), "
-         "leadership roles, extracurricular activities, volunteer work, or other relevant activities in the leadership_activities field if present."),
+         "and a short professional summary if one is present. "
+         "For education: one entry per degree/program with institution, degree, location, dates "
+         "(as written, e.g. 'Expected: September 2027'), grade if stated, and any awards/details. "
+         "For experience: include the location of each role if stated. "
+         "For leadership roles, extracurricular activities, and volunteer work: one leadership_activities "
+         "entry per activity with role, organization, location, dates, a short description, and impact bullets."),
         ("user", "{text}")
     ])
 

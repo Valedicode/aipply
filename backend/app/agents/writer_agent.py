@@ -5,31 +5,17 @@ This agent receives structured data from CV and Job agents and generates:
 1. Tailored CV PDFs based on job requirements
 2. Cover letter PDFs aligned with the job and company
 
-The agent follows a human-in-the-loop workflow:
-- Analyzes gaps between CV and job requirements
-- Proposes modifications for user approval
-- Generates content after approval
-- Creates professional PDF outputs
-
 Architecture:
 - Input: Pre-processed JSON data from cv_agent (ResumeInfo) and job_agent (JobRequirements, CompanyInfo)
-- Processing: Gap analysis → Tailoring plan → Content generation → PDF creation
+- Processing: Gap analysis → Tailoring plan → Content generation → LaTeX → PDF
 - Output: Professional PDF documents (CV and cover letter)
-- Pattern: LangChain agent with specialized tools for each stage
-
-Workflow:
-1. ANALYSIS: Compare CV against job requirements (analyze_cv_job_alignment)
-2. REVIEW: Present tailoring plan and wait for user approval
-3. GENERATION: Create tailored CV HTML (generate_tailored_cv_html)
-4. APPROVAL: Show preview and wait for user confirmation
-5. PDF CREATION: Generate final CV PDF (generate_cv_pdf)
-6. COVER LETTER: Generate letter content and PDF (generate_cover_letter_content, generate_cover_letter_pdf)
+- Pattern: LangChain @tool functions invoked by the orchestrator graph
 
 Key Features:
-- Human-in-the-loop at every critical step
+- Human-in-the-loop at every critical step (orchestrator gates)
 - Preserves candidate's authentic voice
 - Never fabricates content - only emphasizes/refines existing material
-- Professional PDF generation with table-based CV layout
+- LaTeX-based PDF generation via Jinja2 templates and Tectonic/pdflatex
 - Company-aware cover letter generation
 """
 
@@ -43,7 +29,6 @@ from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from pathlib import Path
 import json
-import html
 import dotenv
 import os
 import re
@@ -66,180 +51,19 @@ from app.agents.scoring_agent import (
     build_gap_analysis,
     _calculate_compatibility_score_v2_internal,
 )
+from app.services.latex_renderer import (
+    compile_tex_to_pdf,
+    render_cover_letter_tex,
+    render_cv_tex,
+)
 
 dotenv.load_dotenv()
-
-# ============================================
-# WeasyPrint Import Helpers (Lazy Loading)
-# ============================================
-
-# Lazy import for WeasyPrint to avoid GTK dependency issues on Windows
-# WeasyPrint will only be imported when PDF generation is actually needed
-_weasyprint_available = None
-
-def _check_weasyprint():
-    """Check if WeasyPrint is available and can be imported."""
-    global _weasyprint_available
-    if _weasyprint_available is None:
-        try:
-            from weasyprint import HTML, CSS
-            _weasyprint_available = True
-        except (ImportError, OSError) as e:
-            _weasyprint_available = False
-            print(f"⚠️  WeasyPrint not available: {e}")
-            print("PDF generation will not work. See installation instructions:")
-            print("https://doc.courtbouillon.org/weasyprint/stable/first_steps.html#windows")
-    return _weasyprint_available
-
-def _import_weasyprint():
-    """Import WeasyPrint with error handling."""
-    try:
-        from weasyprint import HTML, CSS
-        return HTML, CSS
-    except (ImportError, OSError) as e:
-        raise RuntimeError(
-            f"WeasyPrint is not properly installed: {e}\n\n"
-            "On Windows, WeasyPrint requires GTK libraries.\n"
-            "Installation options:\n"
-            "1. Install GTK via MSYS2: https://www.gtk.org/docs/installations/windows/\n"
-            "2. Use WSL (Windows Subsystem for Linux)\n"
-            "3. Use Docker\n"
-            "4. Use an alternative PDF library (reportlab, fpdf)\n\n"
-            "See: https://doc.courtbouillon.org/weasyprint/stable/first_steps.html#windows"
-        ) from e
 
 # ============================================
 # Constants
 # ============================================
 
-# Default output directory for generated PDFs
 DEFAULT_OUTPUT_DIR = Path(__file__).parent.parent.parent / "data"
-
-# CSS Template for CV (two-column table layout)
-CV_CSS_TEMPLATE = """
-@page {
-    size: A4;
-    margin: 2cm;
-}
-
-body {
-    font-family: 'Helvetica', 'Arial', sans-serif;
-    font-size: 11pt;
-    line-height: 1.4;
-    color: #333;
-}
-
-h1 {
-    font-size: 24pt;
-    margin-bottom: 0.5em;
-    padding-bottom: 0.3em;
-    border-bottom: 2px solid #333;
-}
-
-h2 {
-    font-size: 14pt;
-    margin-top: 1.5em;
-    margin-bottom: 0.8em;
-    padding-bottom: 0.2em;
-    border-bottom: 1px solid #666;
-}
-
-.contact-info {
-    font-size: 10pt;
-    margin-bottom: 1em;
-    color: #555;
-}
-
-.section-entry {
-    display: flex;
-    margin-bottom: 1.2em;
-    page-break-inside: avoid;
-}
-
-.entry-left {
-    flex: 0 0 40%;
-    font-weight: bold;
-    padding-right: 1em;
-}
-
-.entry-right {
-    flex: 1;
-}
-
-.entry-right .position {
-    font-weight: bold;
-    margin-bottom: 0.3em;
-}
-
-.entry-right .details {
-    font-size: 10pt;
-    color: #555;
-    margin-bottom: 0.5em;
-}
-
-ul {
-    margin: 0.5em 0;
-    padding-left: 1.5em;
-}
-
-li {
-    margin-bottom: 0.3em;
-}
-
-.skills-list {
-    margin-bottom: 0.8em;
-}
-
-.skills-list strong {
-    display: inline-block;
-    min-width: 180px;
-}
-"""
-
-# CSS Template for Cover Letter (simple single-column)
-COVER_LETTER_CSS_TEMPLATE = """
-@page {
-    size: A4;
-    margin: 2.5cm;
-}
-
-body {
-    font-family: 'Times New Roman', 'Georgia', serif;
-    font-size: 12pt;
-    line-height: 1.6;
-    color: #000;
-}
-
-.header {
-    margin-bottom: 2em;
-    font-size: 11pt;
-}
-
-.date {
-    margin-bottom: 2em;
-}
-
-.greeting {
-    margin-bottom: 1.5em;
-}
-
-p {
-    margin-bottom: 1.2em;
-    text-align: justify;
-}
-
-.betreff {
-    margin-bottom: 1.5em;
-}
-
-.closing {
-    margin-top: 2em;
-}
-
-.signature {
-    margin-top: 3em;
-}
-"""
 
 # ============================================
 # Tools (Agent Capabilities)
@@ -304,72 +128,6 @@ def analyze_cv_job_alignment(cv_json: str, job_json: str) -> str:
     result = chain.invoke({"cv": cv_json, "job": job_json})
     
     return result.model_dump_json(indent=2)
-
-@tool
-def generate_tailored_cv_html(cv_json: str, tailoring_plan_json: str) -> str:
-    """
-    Generate HTML content for a tailored CV based on original CV and tailoring plan.
-    
-    This tool creates HTML that maintains the original two-column table layout
-    while incorporating the suggestions from the tailoring plan.
-    
-    Args:
-        cv_json: Original ResumeInfo JSON from cv_agent
-        tailoring_plan_json: CVTailoringPlan JSON from analyze_cv_job_alignment
-        
-    Returns:
-        HTML string representing the tailored CV (body content only, no <html> wrapper)
-        
-    Note:
-        The HTML uses semantic structure with classes for styling:
-        - .section-entry for each CV entry
-        - .entry-left for institution/company names
-        - .entry-right for details and descriptions
-    """
-    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.3)
-    
-    prompt = ChatPromptTemplate.from_messages([
-        ("system", """
-        You are generating HTML for a tailored CV.
-        LAYOUT REQUIREMENTS:
-        1. Maintain two-column structure:
-        - Left column (40%): Institution/Company names in bold
-        - Right column (60%): Roles, dates, locations, bullet points
-
-        2. Structure:
-        - <h1> for candidate name
-        - <div class="contact-info"> for contact details
-        - <h2> for each section (Education, Experience, Skills & Projects, etc.)
-        - <div class="section-entry"> for each entry with:
-            - <div class="entry-left"> (institution/company)
-            - <div class="entry-right"> (details)
-
-        3. Incorporate tailoring plan:
-        - Reorder sections/items per suggestions
-        - Emphasize relevant experiences and projects
-        - Naturally weave in keywords from the plan
-        - Highlight matching skills prominently
-
-        4. Preserve authenticity:
-        - Keep the candidate's voice and writing style
-        - Don't fabricate content
-        - Enhance descriptions with keywords, don't replace them
-
-        RETURN: Only the HTML body content (no <html>, <head>, or <body> tags).
-        Use semantic HTML with the specified class names for proper styling."""),
-        ("user", """Original CV:
-        {cv}
-
-        Tailoring Plan:
-        {plan}
-
-        Generate the tailored CV HTML.""")
-    ])
-    
-    chain = prompt | llm
-    result = chain.invoke({"cv": cv_json, "plan": tailoring_plan_json})
-    
-    return result.content
 
 @tool
 def generate_cover_letter_content(cv_json: str, job_json: str, company_json: str = "", language: str = "english") -> str:
@@ -512,528 +270,122 @@ def generate_cover_letter_content(cv_json: str, job_json: str, company_json: str
     return result.model_dump_json(indent=2)
 
 @tool
-def generate_cv_pdf(html_content: str, output_filename: str, applicant_name: str) -> str:
+def generate_cv_pdf(
+    cv_json: str,
+    output_filename: str,
+    applicant_name: str,
+    section_order_json: str = "",
+) -> str:
     """
-    Generate final CV PDF from HTML content with professional styling.
-    
+    Generate a tailored CV PDF via LaTeX (Harvard-style, JSON Resume taxonomy).
+
     WARNING: Only call this tool after the user has explicitly approved the CV content!
-    
+
     Args:
-        html_content: HTML body content from generate_tailored_cv_html
+        cv_json: ResumeInfo or JSON Resume JSON (merged tailored CV data)
         output_filename: Filename for the PDF (e.g., "kevin_ha_cv_tailored.pdf")
-        applicant_name: Full name for document title metadata
-        
+        applicant_name: Full name for document metadata
+        section_order_json: Optional JSON list of section keys for ordering
+
     Returns:
-        Success message with the full path to the generated PDF file
-        
-    Raises:
-        Exception: If PDF generation fails or output directory is not writable
-        
-    Example:
-        >>> result = generate_cv_pdf(html, "john_doe_cv.pdf", "John Doe")
-        >>> print(result)
-        "CV PDF generated successfully! The file 'john_doe_cv.pdf' is ready for download."
+        Success message with the filename for download
     """
     try:
-        # Import WeasyPrint (lazy loading)
-        HTML, CSS = _import_weasyprint()
-        
-        # Ensure output directory exists
+        if not output_filename.lower().endswith(".pdf"):
+            return "Error: Output filename must end with .pdf"
+
+        try:
+            cv_data = json.loads(cv_json)
+        except json.JSONDecodeError as e:
+            return f"Error: Invalid CV JSON data: {str(e)}"
+
+        section_order: list[str] | None = None
+        if section_order_json and section_order_json.strip():
+            try:
+                parsed = json.loads(section_order_json)
+                if isinstance(parsed, list):
+                    section_order = [s for s in parsed if isinstance(s, str)]
+            except json.JSONDecodeError:
+                pass
+
+        tex_content = render_cv_tex(cv_data, section_order=section_order)
         output_dir = DEFAULT_OUTPUT_DIR
         output_dir.mkdir(parents=True, exist_ok=True)
-        
-        # Construct full output path
-        output_path = output_dir / output_filename
-        
-        # Build complete HTML document
-        # Escape applicant_name to prevent HTML injection
-        escaped_name = html.escape(applicant_name)
-        full_html = f"""<!DOCTYPE html>
-        <html>
-        <head>
-            <meta charset="utf-8">
-            <title>{escaped_name} - CV</title>
-        </head>
-        <body>
-        {html_content}
-        </body>
-        </html>"""
-        
-        # Generate PDF with styling
-        HTML(string=full_html).write_pdf(
-            str(output_path),
-            stylesheets=[CSS(string=CV_CSS_TEMPLATE)]
-        )
-        
-        # Return user-friendly message without exposing server path
-        # Filename is included for backend detection (will be improved with tool tracking)
+
+        stem = Path(output_filename).stem
+        pdf_path = compile_tex_to_pdf(tex_content, output_dir, stem)
+        final_path = output_dir / output_filename
+        if pdf_path != final_path:
+            pdf_path.replace(final_path)
+
         return f"CV PDF generated successfully! The file '{output_filename}' is ready for download."
-        
+
     except RuntimeError as e:
-        # WeasyPrint not available
         return f"Error: {str(e)}"
     except Exception as e:
         return f"Error generating CV PDF: {str(e)}"
 
+
 @tool
-def generate_cover_letter_pdf(content_json: str, output_filename: str, applicant_name: str, applicant_contact: str, recipient_info: str = "Hiring Manager") -> str:
+def generate_cover_letter_pdf(
+    content_json: str,
+    output_filename: str,
+    applicant_name: str,
+    applicant_contact: str,
+    recipient_info: str = "Hiring Manager",
+) -> str:
     """
-    Generate cover letter PDF from structured content.
-    
-    Creates a simple, professional cover letter PDF with proper business letter formatting.
-    
+    Generate cover letter PDF from structured content via LaTeX.
+
     WARNING: Only call this tool after the user has explicitly approved the cover letter content!
-    
-    Args:
-        content_json: CoverLetterContent JSON from generate_cover_letter_content (the JSON string output from that tool)
-        output_filename: Filename for the PDF (e.g., "john_doe_cover_letter.pdf")
-        applicant_name: Full name from CV data - extract from cv_data['name'] or cv_data['full_name']
-        applicant_contact: Contact info formatted as "email | phone" - construct from cv_data['email'] and cv_data['phone']
-        recipient_info: Who to address (default: "Hiring Manager") - can extract from job_data if specified
-        
-    Returns:
-        Success message indicating the PDF was generated (filename included for backend detection)
-        
-    Example:
-        >>> # Get CV data from system context
-        >>> name = cv_data['name']  # or cv_data['full_name']
-        >>> email = cv_data.get('email', 'email@example.com')
-        >>> phone = cv_data.get('phone', '')
-        >>> contact = f"{email} | {phone}" if phone else email
-        >>> 
-        >>> result = generate_cover_letter_pdf(
-        ...     content_json=cover_letter_json_output,
-        ...     output_filename="john_doe_cover_letter.pdf",
-        ...     applicant_name=name,
-        ...     applicant_contact=contact,
-        ...     recipient_info="Hiring Manager"
-        ... )
     """
     try:
-        # Import WeasyPrint (lazy loading)
-        HTML, CSS = _import_weasyprint()
-        
-        # Parse content with better error handling
+        if not output_filename.lower().endswith(".pdf"):
+            return "Error: Output filename must end with .pdf"
+
         try:
             content = json.loads(content_json)
         except json.JSONDecodeError as e:
             return f"Error: Invalid JSON format for cover letter content. {str(e)}"
-        
-        # Validate required fields
-        required_fields = ['opening_paragraph', 'body_paragraph_1', 'body_paragraph_2', 'closing_paragraph']
+
+        required_fields = [
+            "opening_paragraph",
+            "body_paragraph_1",
+            "body_paragraph_2",
+            "closing_paragraph",
+        ]
         missing_fields = [field for field in required_fields if field not in content]
         if missing_fields:
-            return f"Error: Cover letter content is missing required fields: {', '.join(missing_fields)}"
-        
-        # Ensure output directory exists
+            return (
+                "Error: Cover letter content is missing required fields: "
+                f"{', '.join(missing_fields)}"
+            )
+
+        tex_content = render_cover_letter_tex(
+            content,
+            applicant_name=applicant_name,
+            applicant_contact=applicant_contact,
+            recipient_info=recipient_info,
+        )
         output_dir = DEFAULT_OUTPUT_DIR
         output_dir.mkdir(parents=True, exist_ok=True)
-        
-        # Construct full output path
-        output_path = output_dir / output_filename
-        
-        # Determine language/format
-        is_german = content.get('language', 'english').lower() == 'german'
 
-        # Build body paragraphs list (excluding empty optional paragraph)
-        paragraphs = [
-            content['opening_paragraph'],
-            content['body_paragraph_1'],
-            content['body_paragraph_2']
-        ]
-        if content.get('body_paragraph_3', '').strip():
-            paragraphs.append(content['body_paragraph_3'])
-        paragraphs.append(content['closing_paragraph'])
+        stem = Path(output_filename).stem
+        pdf_path = compile_tex_to_pdf(tex_content, output_dir, stem)
+        final_path = output_dir / output_filename
+        if pdf_path != final_path:
+            pdf_path.replace(final_path)
 
-        # Generate paragraph HTML with proper escaping
-        paragraphs_html = '\n'.join([f'<p>{html.escape(p)}</p>' for p in paragraphs])
-
-        # Get current date
-        from datetime import datetime
-        if is_german:
-            # German locale date format: "18. Juni 2026"
-            GERMAN_MONTHS = {
-                1: "Januar", 2: "Februar", 3: "März", 4: "April",
-                5: "Mai", 6: "Juni", 7: "Juli", 8: "August",
-                9: "September", 10: "Oktober", 11: "November", 12: "Dezember"
-            }
-            now = datetime.now()
-            current_date = f"{now.day}. {GERMAN_MONTHS[now.month]} {now.year}"
-        else:
-            current_date = datetime.now().strftime("%B %d, %Y")
-
-        # Escape user-provided data to prevent HTML injection
-        escaped_name = html.escape(applicant_name)
-        escaped_contact = html.escape(applicant_contact)
-        escaped_recipient = html.escape(recipient_info)
-
-        if is_german:
-            betreff = html.escape(content.get('betreff', ''))
-            grussformel = html.escape(content.get('grussformel', 'Mit freundlichen Grüßen'))
-            betreff_html = f'<div class="betreff"><strong>{betreff}</strong></div>' if betreff else ''
-            salutation = f"Sehr geehrte/r {escaped_recipient}," if escaped_recipient and escaped_recipient != "Hiring Manager" else "Sehr geehrte Damen und Herren,"
-            full_html = f"""<!DOCTYPE html>
-        <html>
-        <head>
-            <meta charset="utf-8">
-            <title>Anschreiben - {escaped_name}</title>
-        </head>
-        <body>
-            <div class="header">
-                <strong>{escaped_name}</strong><br>
-                {escaped_contact}
-            </div>
-
-            <div class="date">
-                {current_date}
-            </div>
-
-            {betreff_html}
-
-            <div class="greeting">
-                {salutation}
-            </div>
-
-            {paragraphs_html}
-
-            <div class="closing">
-                {grussformel}
-            </div>
-
-            <div class="signature">
-                {escaped_name}
-            </div>
-        </body>
-        </html>"""
-        else:
-            full_html = f"""<!DOCTYPE html>
-        <html>
-        <head>
-            <meta charset="utf-8">
-            <title>Cover Letter - {escaped_name}</title>
-        </head>
-        <body>
-            <div class="header">
-                <strong>{escaped_name}</strong><br>
-                {escaped_contact}
-            </div>
-
-            <div class="date">
-                {current_date}
-            </div>
-
-            <div class="greeting">
-                Dear {escaped_recipient},
-            </div>
-
-            {paragraphs_html}
-
-            <div class="closing">
-                Sincerely,
-            </div>
-
-            <div class="signature">
-                {escaped_name}
-            </div>
-        </body>
-        </html>"""
-        
-        # Generate PDF with styling
-        HTML(string=full_html).write_pdf(
-            str(output_path),
-            stylesheets=[CSS(string=COVER_LETTER_CSS_TEMPLATE)]
+        return (
+            f"Cover letter PDF generated successfully! "
+            f"The file '{output_filename}' is ready for download."
         )
-        
-        # Return user-friendly message without exposing server path
-        # Filename is included for backend detection (will be improved with tool tracking)
-        return f"Cover letter PDF generated successfully! The file '{output_filename}' is ready for download."
-        
+
     except RuntimeError as e:
-        # WeasyPrint not available
         return f"Error: {str(e)}"
     except Exception as e:
         return f"Error generating cover letter PDF: {str(e)}"
 
-@tool
-def generate_cv_docx(cv_json: str, output_filename: str, applicant_name: str) -> str:
-    """
-    Generate a Word document (.docx) with CV content in basic structure.
-    
-    WARNING: Only call this tool after the user has explicitly approved the CV content!
-    
-    This creates a simple Word document with structured content. The formatting is minimal
-    so users can easily customize it in Microsoft Word or Google Docs to match their preferences.
-    
-    Args:
-        cv_json: ResumeInfo JSON string from cv_agent (the original CV data)
-        output_filename: Filename for the Word document (e.g., "kevin_ha_cv_tailored.docx")
-        applicant_name: Full name for document title
-    
-    Returns:
-        Success message with the filename for download
-    
-    Example:
-        >>> result = generate_cv_docx(cv_data, "john_doe_cv.docx", "John Doe")
-        >>> print(result)
-    """
-    try:
-        from docx import Document
-        from docx.shared import Pt
-        
-        # Parse CV data
-        cv_data = json.loads(cv_json)
-        
-        # Ensure output directory exists
-        output_dir = DEFAULT_OUTPUT_DIR
-        output_dir.mkdir(parents=True, exist_ok=True)
-        
-        # Construct full output path
-        output_path = output_dir / output_filename
-        
-        # Create document
-        doc = Document()
-        
-        # Title (Name) - Level 1 heading
-        title = doc.add_heading(cv_data.get('name', applicant_name), level=1)
-        
-        # Contact information
-        contact_parts = []
-        if cv_data.get('email'):
-            contact_parts.append(cv_data['email'])
-        if cv_data.get('phone'):
-            contact_parts.append(cv_data['phone'])
-        if cv_data.get('location'):
-            contact_parts.append(cv_data['location'])
-        if cv_data.get('linkedin_url'):
-            contact_parts.append(f"LinkedIn: {cv_data['linkedin_url']}")
-        if cv_data.get('github_url'):
-            contact_parts.append(f"GitHub: {cv_data['github_url']}")
-        if cv_data.get('portfolio_url'):
-            contact_parts.append(f"Portfolio: {cv_data['portfolio_url']}")
-        
-        if contact_parts:
-            contact_para = doc.add_paragraph(' | '.join(contact_parts))
-            contact_para.style.font.size = Pt(10)
-        
-        # Education section
-        if cv_data.get('education'):
-            doc.add_heading('Education', level=2)
-            for edu in cv_data['education']:
-                edu_para = doc.add_paragraph()
-                if edu.get('degree'):
-                    edu_para.add_run(edu['degree']).bold = True
-                if edu.get('institution'):
-                    if edu.get('degree'):
-                        edu_para.add_run(f" - {edu['institution']}")
-                    else:
-                        edu_para.add_run(edu['institution']).bold = True
-                if edu.get('dates'):
-                    edu_para.add_run(f" ({edu['dates']})")
-                if edu.get('location'):
-                    edu_para.add_run(f", {edu['location']}")
-                if edu.get('gpa'):
-                    edu_para.add_run(f" - GPA: {edu['gpa']}")
-        
-        # Experience section
-        if cv_data.get('experience'):
-            doc.add_heading('Experience', level=2)
-            for exp in cv_data['experience']:
-                # Position and company
-                exp_para = doc.add_paragraph()
-                if exp.get('position'):
-                    exp_para.add_run(exp['position']).bold = True
-                if exp.get('company'):
-                    if exp.get('position'):
-                        exp_para.add_run(f" at {exp['company']}")
-                    else:
-                        exp_para.add_run(exp['company']).bold = True
-                if exp.get('dates'):
-                    exp_para.add_run(f" ({exp['dates']})")
-                if exp.get('location'):
-                    exp_para.add_run(f" - {exp['location']}")
-                
-                # Responsibilities/bullet points
-                if exp.get('responsibilities'):
-                    for resp in exp['responsibilities']:
-                        doc.add_paragraph(resp, style='List Bullet')
-        
-        # Skills section
-        if cv_data.get('skills'):
-            doc.add_heading('Skills', level=2)
-            skills_text = ', '.join(cv_data['skills'])
-            doc.add_paragraph(skills_text)
-        
-        # Projects section
-        if cv_data.get('projects'):
-            doc.add_heading('Projects', level=2)
-            for project in cv_data['projects']:
-                proj_para = doc.add_paragraph()
-                if project.get('name'):
-                    proj_para.add_run(project['name']).bold = True
-                if project.get('description'):
-                    if project.get('name'):
-                        proj_para.add_run(f": {project['description']}")
-                    else:
-                        proj_para.add_run(project['description'])
-                if project.get('technologies'):
-                    tech_text = ', '.join(project['technologies']) if isinstance(project['technologies'], list) else project['technologies']
-                    doc.add_paragraph(f"Technologies: {tech_text}", style='List Bullet')
-        
-        # Leadership & Activities section
-        if cv_data.get('leadership_activities'):
-            doc.add_heading('Leadership & Activities', level=2)
-            for activity in cv_data['leadership_activities']:
-                act_para = doc.add_paragraph()
-                if activity.get('role'):
-                    act_para.add_run(activity['role']).bold = True
-                if activity.get('organization'):
-                    if activity.get('role'):
-                        act_para.add_run(f" - {activity['organization']}")
-                    else:
-                        act_para.add_run(activity['organization']).bold = True
-                if activity.get('dates'):
-                    act_para.add_run(f" ({activity['dates']})")
-                if activity.get('description'):
-                    doc.add_paragraph(activity['description'], style='List Bullet')
-        
-        # Save document
-        doc.save(str(output_path))
-        
-        return f"CV Word document generated successfully! The file '{output_filename}' is ready for download. You can customize the formatting in Microsoft Word or Google Docs."
-        
-    except ImportError:
-        return "Error: python-docx library is not installed. Please install it to generate Word documents."
-    except json.JSONDecodeError as e:
-        return f"Error: Invalid CV JSON data: {str(e)}"
-    except Exception as e:
-        return f"Error generating CV Word document: {str(e)}"
-
-@tool
-def generate_cover_letter_docx(content_json: str, output_filename: str, applicant_name: str, applicant_contact: str, recipient_info: str = "Hiring Manager") -> str:
-    """
-    Generate a Word document (.docx) with cover letter content in basic structure.
-    
-    WARNING: Only call this tool after the user has explicitly approved the cover letter content!
-    
-    This creates a simple Word document with structured cover letter content. The formatting is minimal
-    so users can easily customize it in Microsoft Word or Google Docs.
-    
-    Args:
-        content_json: CoverLetterContent JSON from generate_cover_letter_content (the JSON string output)
-        output_filename: Filename for the Word document (e.g., "john_doe_cover_letter.docx")
-        applicant_name: Full name from CV data
-        applicant_contact: Contact info formatted as "email | phone"
-        recipient_info: Who to address (default: "Hiring Manager")
-    
-    Returns:
-        Success message with the filename for download
-    
-    Example:
-        >>> result = generate_cover_letter_docx(
-        ...     content_json=cover_letter_json_output,
-        ...     output_filename="john_doe_cover_letter.docx",
-        ...     applicant_name="John Doe",
-        ...     applicant_contact="john@email.com | (123) 456-7890)",
-        ...     recipient_info="Hiring Manager"
-        ... )
-    """
-    try:
-        from docx import Document
-        from docx.shared import Pt
-        from docx.enum.text import WD_ALIGN_PARAGRAPH
-        from datetime import datetime
-
-        # Parse cover letter content
-        content_data = json.loads(content_json)
-
-        is_german = content_data.get('language', 'english').lower() == 'german'
-
-        # Ensure output directory exists
-        output_dir = DEFAULT_OUTPUT_DIR
-        output_dir.mkdir(parents=True, exist_ok=True)
-
-        # Construct full output path
-        output_path = output_dir / output_filename
-
-        # Create document
-        doc = Document()
-
-        # Header with name and contact
-        header_para = doc.add_paragraph()
-        header_para.add_run(applicant_name).bold = True
-        header_para.add_run(f"\n{applicant_contact}")
-
-        # Date
-        if is_german:
-            GERMAN_MONTHS = {
-                1: "Januar", 2: "Februar", 3: "März", 4: "April",
-                5: "Mai", 6: "Juni", 7: "Juli", 8: "August",
-                9: "September", 10: "Oktober", 11: "November", 12: "Dezember"
-            }
-            now = datetime.now()
-            current_date = f"{now.day}. {GERMAN_MONTHS[now.month]} {now.year}"
-        else:
-            current_date = datetime.now().strftime("%B %d, %Y")
-
-        date_para = doc.add_paragraph(current_date)
-        date_para.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-
-        # German Betreff (subject line) before salutation
-        if is_german:
-            betreff = content_data.get('betreff', '').strip()
-            if betreff:
-                betreff_para = doc.add_paragraph()
-                betreff_para.add_run(betreff).bold = True
-
-        # Greeting / Salutation
-        greeting_para = doc.add_paragraph()
-        if is_german:
-            if recipient_info and recipient_info != "Hiring Manager":
-                salutation = f"Sehr geehrte/r {recipient_info},"
-            else:
-                salutation = "Sehr geehrte Damen und Herren,"
-        else:
-            salutation = f"Dear {recipient_info},"
-        greeting_para.add_run(salutation)
-
-        # Body paragraphs — read from CoverLetterContent fields
-        body_fields = [
-            content_data.get('opening_paragraph', ''),
-            content_data.get('body_paragraph_1', ''),
-            content_data.get('body_paragraph_2', ''),
-        ]
-        body_para_3 = content_data.get('body_paragraph_3', '').strip()
-        if body_para_3:
-            body_fields.append(body_para_3)
-        body_fields.append(content_data.get('closing_paragraph', ''))
-
-        for para_text in body_fields:
-            if para_text.strip():
-                doc.add_paragraph(para_text)
-
-        # Closing / Grußformel
-        if is_german:
-            grussformel = content_data.get('grussformel', 'Mit freundlichen Grüßen')
-            closing_para = doc.add_paragraph(grussformel)
-        else:
-            closing_para = doc.add_paragraph("Sincerely,")
-        closing_para.space_after = Pt(12)
-
-        # Signature
-        signature_para = doc.add_paragraph(applicant_name)
-        signature_para.space_before = Pt(24)
-
-        # Save document
-        doc.save(str(output_path))
-
-        return f"Cover letter Word document generated successfully! The file '{output_filename}' is ready for download. You can customize the formatting in Microsoft Word or Google Docs."
-
-    except ImportError:
-        return "Error: python-docx library is not installed. Please install it to generate Word documents."
-    except json.JSONDecodeError as e:
-        return f"Error: Invalid cover letter JSON data: {str(e)}"
-    except Exception as e:
-        return f"Error generating cover letter Word document: {str(e)}"
 
 # ============================================
 # Enhanced Tailoring Tools (Phase 1 & 2)
