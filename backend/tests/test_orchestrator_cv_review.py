@@ -19,6 +19,7 @@ Run with::
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
@@ -35,6 +36,20 @@ from app.agents.orchestrator.nodes_cv_review import (
     CR_GATE_LEADERSHIP,
     CR_GATE_SKILLS_PROJECTS,
 )
+
+
+def _fake_generate_cv_pdf(kwargs: dict[str, Any]) -> str:
+    return f"CV PDF generated successfully! The file '{kwargs['output_filename']}' is ready for download."
+
+
+@pytest.fixture
+def patched_cv_pdf():
+    """Deterministic stand-in for the LaTeX/PDF-backed tool used by cr_step7_finalize."""
+    with patch(
+        "app.agents.orchestrator.nodes_cv_review.generate_cv_pdf",
+        SimpleNamespace(invoke=_fake_generate_cv_pdf),
+    ):
+        yield
 
 
 # --------------------------------------------------------------------------- #
@@ -194,7 +209,7 @@ def _interrupt_step(result: dict[str, Any]) -> str | None:
 # Tests
 # --------------------------------------------------------------------------- #
 
-def test_full_happy_path_visits_all_six_gates(patched_llm, graph):
+def test_full_happy_path_visits_all_six_gates(patched_llm, patched_cv_pdf, graph):
     cfg = _config("cv-review-happy")
     state_input = {"flow": "cv_review", "cv_data": CV_WITH_LEADERSHIP, "review_outputs": {}}
 
@@ -223,8 +238,23 @@ def test_full_happy_path_visits_all_six_gates(patched_llm, graph):
     for step_key in ("header", "education", "experience", "leadership", "skills_projects", "assessment"):
         assert step_key in review, f"missing step output: {step_key}"
 
+    # cr_step7_finalize should have produced a downloadable, revised CV PDF.
+    generated = final.get("generated_files") or []
+    assert len(generated) == 1
+    assert generated[0]["file_type"] == "cv"
+    assert generated[0]["filename"].endswith(".pdf")
 
-def test_leadership_step_is_skipped_when_section_empty(patched_llm, graph):
+    revised_cv = final["cv_data"]
+    assert revised_cv["education"] == [
+        "B.Sc. Computer Science, University of London (2017-2020)",
+        "M.Sc. Applied Math, University of London (in progress)",
+    ]
+    assert revised_cv["experience"][0]["responsibilities"][0] == (
+        "Designed the first general-purpose computing algorithm, foundational to modern CS."
+    )
+
+
+def test_leadership_step_is_skipped_when_section_empty(patched_llm, patched_cv_pdf, graph):
     cfg = _config("cv-review-no-leadership")
     state_input = {"flow": "cv_review", "cv_data": CV_WITHOUT_LEADERSHIP, "review_outputs": {}}
 
@@ -247,6 +277,7 @@ def test_leadership_step_is_skipped_when_section_empty(patched_llm, graph):
     final = graph.invoke(Command(resume={"action": "approve"}), config=cfg)
     assert "__interrupt__" not in final
     assert "leadership" not in final["review_outputs"]
+    assert len(final.get("generated_files") or []) == 1
 
 
 def test_edit_at_header_reruns_step_and_passes_feedback(patched_llm, graph):

@@ -30,7 +30,6 @@ from app.agents.orchestrator.nodes_job_tailoring import (
     JT_GATE_APPROVE_REWRITE,
     JT_GATE_APPROVE_SELECTION,
     JT_GATE_COVER_LETTER,
-    JT_GATE_EXPORT_FORMAT,
     JT_GATE_PRESENT_SCORE,
 )
 
@@ -184,19 +183,12 @@ def patched_tools():
         "decide_tailoring_strategy": _fake_tool(lambda _: json.dumps(STRATEGY)),
         "select_prioritize_content": _fake_tool(lambda _: json.dumps(SELECTED)),
         "rewrite_enhance_content": _fake_tool(lambda _: json.dumps(REWRITTEN)),
-        "generate_tailored_cv_html": _fake_tool(lambda _: "<h1>Ada Lovelace</h1>"),
         "generate_cv_pdf": _fake_tool(
             lambda kw: f"CV PDF generated successfully! The file '{kw['output_filename']}' is ready for download."
-        ),
-        "generate_cv_docx": _fake_tool(
-            lambda kw: f"CV Word document generated successfully! The file '{kw['output_filename']}' is ready for download."
         ),
         "generate_cover_letter_content": _fake_tool(lambda _: json.dumps(COVER_LETTER_CONTENT)),
         "generate_cover_letter_pdf": _fake_tool(
             lambda kw: f"Cover letter PDF generated successfully! The file '{kw['output_filename']}' is ready for download."
-        ),
-        "generate_cover_letter_docx": _fake_tool(
-            lambda kw: f"Cover letter Word document generated successfully! The file '{kw['output_filename']}' is ready for download."
         ),
     }
     contexts = [
@@ -220,7 +212,7 @@ def graph():
 # Tests
 # --------------------------------------------------------------------------- #
 
-def test_full_happy_path_emits_all_six_gates_and_generates_files(graph, patched_tools):
+def test_full_happy_path_emits_all_five_gates_and_generates_files(graph, patched_tools):
     config = {"configurable": {"thread_id": "test-happy"}}
 
     # 1. Initial invocation runs entry + steps 1-2, then interrupts at present_score.
@@ -245,26 +237,20 @@ def test_full_happy_path_emits_all_six_gates_and_generates_files(graph, patched_
     assert payload["step"] == "approve_rewrite"
     assert payload["preview"]["rewritten_bullets"][0]["rewritten"].startswith("Designed and validated")
 
-    # 4. Approve rewrite -> runs step 6 + assembles, interrupts at export_format.
+    # 4. Approve rewrite -> runs step 6 + 7, interrupts at cover_letter language.
     result = graph.invoke(Command(resume={"action": "approve"}), config=config)
     payload = _interrupt_payload(result)
-    assert payload["step"] == "export_format"
-    assert payload["kind"] == "choice"
-    assert set(payload["choices"]) == {"pdf", "docx", "both"}
-
-    # 5. Pick 'both' -> runs step 7 (PDF+DOCX), interrupts at cover_letter language.
-    result = graph.invoke(Command(resume={"action": "choose", "choice": "both"}), config=config)
-    payload = _interrupt_payload(result)
     assert payload["step"] == "cover_letter_language"
+    assert payload["kind"] == "choice"
     assert "english" in payload["choices"]
 
-    # 6. Pick 'english' -> runs step 8 (cover-letter content), interrupts at approve_cover_letter.
+    # 5. Pick 'english' -> runs step 8 (cover-letter content), interrupts at approve_cover_letter.
     result = graph.invoke(Command(resume={"action": "choose", "choice": "english"}), config=config)
     payload = _interrupt_payload(result)
     assert payload["step"] == "approve_cover_letter"
     assert payload["preview"]["opening_paragraph"] == "Hello."
 
-    # 7. Approve cover letter -> step 9, then END.
+    # 6. Approve cover letter -> step 9, then END.
     result = graph.invoke(Command(resume={"action": "approve"}), config=config)
     assert "__interrupt__" not in result, "graph should terminate after step 9"
 
@@ -272,9 +258,8 @@ def test_full_happy_path_emits_all_six_gates_and_generates_files(graph, patched_
     files = state["generated_files"]
     types = sorted(f["file_type"] for f in files)
     names = [f["filename"] for f in files]
-    assert "cv" in types and "docx" in types and "cover_letter" in types
+    assert "cv" in types and "cover_letter" in types
     assert any(n.endswith("_cv_tailored.pdf") for n in names)
-    assert any(n.endswith("_cv_tailored.docx") for n in names)
     assert any(n.endswith("_cover_letter.pdf") for n in names)
 
     # The first rewritten bullet should have been merged into experience.
@@ -326,7 +311,6 @@ def test_skip_cover_letter_after_cv_generation(graph, patched_tools):
     graph.invoke(Command(resume={"action": "approve"}), config=config)  # present_score
     graph.invoke(Command(resume={"action": "approve"}), config=config)  # approve_selection
     graph.invoke(Command(resume={"action": "approve"}), config=config)  # approve_rewrite
-    graph.invoke(Command(resume={"action": "choose", "choice": "pdf"}), config=config)  # export
     result = graph.invoke(Command(resume={"action": "choose", "choice": "skip"}), config=config)
 
     assert "__interrupt__" not in result
@@ -336,7 +320,6 @@ def test_skip_cover_letter_after_cv_generation(graph, patched_tools):
     assert "cover_letter" not in types
     # Only the CV PDF was requested.
     assert any(f["filename"].endswith("_cv_tailored.pdf") for f in files)
-    assert not any(f["filename"].endswith(".docx") for f in files)
 
 
 def test_discovery_flow_routes_to_stub(graph, patched_tools):
