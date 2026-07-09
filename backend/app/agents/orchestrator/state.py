@@ -85,6 +85,7 @@ class OrchestratorState(TypedDict, total=False):
     rewritten_content: dict[str, Any] | None
     cover_letter_content: dict[str, Any] | None
     cover_letter_language: CoverLetterLanguage | None
+    cover_letter_recipient: str | None
 
     # --- cv-review artifacts -----------------------------------------------
     review_outputs: dict[str, dict[str, Any]]

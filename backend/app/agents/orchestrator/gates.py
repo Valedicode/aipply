@@ -9,6 +9,7 @@ GateResolution. The graph is resumed with Command(resume=GateResolution.dict()).
 Gate kinds:
 - "approval" : Approve / Reject / (optionally) Edit a structured preview.
 - "choice"   : Pick one option from a fixed list (e.g. PDF / DOCX / both).
+- "input"    : Collect a single free-text value (submitted via action='edit').
 
 The two enums (GateKind, GateAction) are exposed as plain string Literals so
 they serialise cleanly through JSON without needing custom encoders.
@@ -25,7 +26,7 @@ from pydantic import BaseModel, Field, model_validator
 # Enums
 # --------------------------------------------------------------------------- #
 
-GateKind = Literal["approval", "choice"]
+GateKind = Literal["approval", "choice", "input"]
 
 GateAction = Literal["approve", "reject", "edit", "choose"]
 
@@ -87,6 +88,8 @@ class GatePayload(BaseModel):
                 raise ValueError("choices must be provided for kind='choice'")
             if "choose" not in self.allowed_actions:
                 raise ValueError("kind='choice' gates must allow the 'choose' action")
+        if self.kind == "input" and "edit" not in self.allowed_actions:
+            raise ValueError("kind='input' gates must allow the 'edit' action")
         return self
 
 

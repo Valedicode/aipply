@@ -36,6 +36,7 @@ from app.agents.writer_agent import (
     rewrite_enhance_content,
     select_prioritize_content,
 )
+from app.services.latex_renderer import extract_recipient_name
 from app.agents.scoring_agent import calculate_compatibility_score_v2
 
 
@@ -57,6 +58,8 @@ JT_GATE_APPROVE_REWRITE = "jt_gate_approve_rewrite"
 JT_STEP6_ASSEMBLE = "jt_step6_assemble_cv"
 JT_STEP7_GENERATE_CV_FILES = "jt_step7_generate_cv_files"
 JT_GATE_COVER_LETTER = "jt_gate_cover_letter"
+JT_STEP_SET_COVER_LETTER_RECIPIENT = "jt_step_set_cover_letter_recipient"
+JT_GATE_COVER_LETTER_RECIPIENT = "jt_gate_cover_letter_recipient"
 JT_STEP8_COVER_LETTER_CONTENT = "jt_step8_cover_letter_content"
 JT_GATE_APPROVE_COVER_LETTER = "jt_gate_approve_cover_letter"
 JT_STEP9_COVER_LETTER_FILES = "jt_step9_cover_letter_files"
@@ -681,6 +684,55 @@ def jt_gate_cover_letter(state: OrchestratorState) -> Command:
             "pending_gate": None,
             "cover_letter_language": choice,  # type: ignore[typeddict-item]
         },
+        goto=JT_STEP_SET_COVER_LETTER_RECIPIENT,
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Resolve cover letter recipient (from job posting or user input)
+# --------------------------------------------------------------------------- #
+
+def jt_step_set_cover_letter_recipient(state: OrchestratorState) -> Command:
+    recipient = extract_recipient_name(state.get("job_data"))
+    if recipient:
+        return Command(
+            update=_narrate(
+                {"cover_letter_recipient": recipient},
+                f"Addressing the cover letter to {recipient}.",
+            ),
+            goto=JT_STEP8_COVER_LETTER_CONTENT,
+        )
+    return Command(
+        update={"pending_gate": None},
+        goto=JT_GATE_COVER_LETTER_RECIPIENT,
+    )
+
+
+def jt_gate_cover_letter_recipient(state: OrchestratorState) -> Command:
+    payload = GatePayload(
+        step="cover_letter_recipient",
+        kind="input",
+        narration=(
+            "Who should the cover letter be addressed to? "
+            "Enter the recipient's name (no default is used)."
+        ),
+        preview={},
+        allowed_actions=["edit"],
+    ).model_dump()
+
+    raw = interrupt(payload)
+    resolution = GateResolution.model_validate(raw)
+    recipient = (resolution.feedback or "").strip()
+    if not recipient:
+        return Command(
+            update=_narrate({}, "Please provide the recipient name to continue."),
+            goto=JT_GATE_COVER_LETTER_RECIPIENT,
+        )
+    return Command(
+        update={
+            "pending_gate": None,
+            "cover_letter_recipient": recipient,  # type: ignore[typeddict-item]
+        },
         goto=JT_STEP8_COVER_LETTER_CONTENT,
     )
 
@@ -760,7 +812,12 @@ def jt_step9_cover_letter_files(state: OrchestratorState) -> dict[str, Any]:
     base = _filename_base(cv_data)
     applicant_name = cv_data.get("name", "Applicant")
     applicant_contact = _applicant_contact(cv_data)
-    recipient_info = "Hiring Manager"
+    recipient_info = (state.get("cover_letter_recipient") or "").strip()
+    if not recipient_info:
+        return _narrate(
+            {},
+            "Cover-letter export skipped: recipient name is required.",
+        )
 
     suffix = "anschreiben" if language == "german" else "cover_letter"
     generated: list[dict[str, str]] = list(state.get("generated_files") or [])
@@ -773,6 +830,8 @@ def jt_step9_cover_letter_files(state: OrchestratorState) -> dict[str, Any]:
         "applicant_name": applicant_name,
         "applicant_contact": applicant_contact,
         "recipient_info": recipient_info,
+        "cv_json": json.dumps(cv_data),
+        "job_json": json.dumps(state.get("job_data") or {}),
     })
     if isinstance(pdf_msg, str) and "Error" not in pdf_msg:
         filename = _extract_filename(pdf_msg) or pdf_name
