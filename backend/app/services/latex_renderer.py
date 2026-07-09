@@ -59,6 +59,20 @@ def latex_escape(text: str | None) -> str:
     return "".join(replacements.get(ch, ch) for ch in text)
 
 
+def latex_url(text: str | None) -> str:
+    """Escape a URL for use inside ``\\href{...}{...}``."""
+    if text is None:
+        return ""
+    if not isinstance(text, str):
+        text = str(text)
+    return (
+        text.replace("\\", r"\textbackslash{}")
+        .replace("%", r"\%")
+        .replace("#", r"\#")
+        .replace("_", r"\_")
+    )
+
+
 def _jinja_env() -> Environment:
     env = Environment(
         loader=FileSystemLoader(str(TEMPLATES_DIR)),
@@ -67,6 +81,7 @@ def _jinja_env() -> Environment:
         lstrip_blocks=True,
     )
     env.filters["latex_escape"] = latex_escape
+    env.filters["latex_url"] = latex_url
     return env
 
 
@@ -88,11 +103,107 @@ def _format_date(language: str) -> str:
     return now.strftime("%B %d, %Y")
 
 
+def _short_link_label(url: str, fallback: str) -> str:
+    """Human-readable link text for the header column."""
+    url = url.strip()
+    if not url:
+        return fallback
+    for prefix in ("https://", "http://", "www."):
+        if url.lower().startswith(prefix):
+            url = url[len(prefix) :]
+    return url.rstrip("/") or fallback
+
+
+def _cover_letter_header_links(cv_data: dict[str, Any]) -> list[tuple[str, str]]:
+    """Up to two (url, label) pairs for the header right column."""
+    links: list[tuple[str, str]] = []
+    seen: set[str] = set()
+
+    def _add(url: str | None, label: str) -> None:
+        if not isinstance(url, str) or not url.strip():
+            return
+        clean = url.strip()
+        if clean in seen or len(links) >= 2:
+            return
+        seen.add(clean)
+        links.append((clean, _short_link_label(clean, label)))
+
+    _add(cv_data.get("linkedin_url"), "LinkedIn")
+    _add(cv_data.get("github_url"), "GitHub")
+    _add(cv_data.get("portfolio_url"), "Portfolio")
+    return links
+
+
+def extract_recipient_name(job_data: dict[str, Any] | None) -> str:
+    """Return a named recipient from job posting data, or empty string."""
+    if not isinstance(job_data, dict):
+        return ""
+    for key in ("recipient_name", "contact_name", "hiring_contact", "contact_person"):
+        val = job_data.get(key)
+        if isinstance(val, str) and val.strip():
+            return val.strip()
+    return ""
+
+
+def _cover_letter_salutation(recipient_info: str, *, is_german: bool) -> str:
+    recipient = (recipient_info or "").strip()
+    if not recipient:
+        raise ValueError("recipient_info is required for the cover letter salutation")
+    if is_german:
+        return f"Sehr geehrte/r {recipient},"
+    return f"Dear {recipient},"
+
+
+def _cover_letter_context(
+    cv_data: dict[str, Any] | None,
+    job_data: dict[str, Any] | None,
+    applicant_name: str,
+    applicant_contact: str = "",
+) -> dict[str, Any]:
+    """Extract header fields for the entry-level cover letter template."""
+    cv = cv_data or {}
+    job = job_data or {}
+
+    phone = str(cv.get("phone") or "").strip()
+    email = str(cv.get("email") or "").strip()
+    if not email and applicant_contact and "@" in applicant_contact:
+        # Legacy callers pass "email | phone" in applicant_contact.
+        email = applicant_contact.split("|")[0].strip()
+    if not phone and "|" in applicant_contact:
+        parts = [p.strip() for p in applicant_contact.split("|")]
+        if len(parts) > 1:
+            phone = parts[1]
+
+    target_job = ""
+    for key in ("job_title", "title", "position"):
+        val = job.get(key)
+        if isinstance(val, str) and val.strip():
+            target_job = val.strip()
+            break
+
+    header_links = _cover_letter_header_links(cv)
+    link_1 = header_links[0] if len(header_links) > 0 else None
+    link_2 = header_links[1] if len(header_links) > 1 else None
+
+    return {
+        "name": str(cv.get("name") or applicant_name or "Applicant").strip(),
+        "phone": phone,
+        "email": email,
+        "target_job": target_job,
+        "link_1_url": link_1[0] if link_1 else "",
+        "link_1_label": link_1[1] if link_1 else "",
+        "link_2_url": link_2[0] if link_2 else "",
+        "link_2_label": link_2[1] if link_2 else "",
+    }
+
+
 def render_cover_letter_tex(
     content: dict[str, Any],
     applicant_name: str,
-    applicant_contact: str,
-    recipient_info: str = "Hiring Manager",
+    applicant_contact: str = "",
+    recipient_info: str = "",
+    cv_data: dict[str, Any] | None = None,
+    job_data: dict[str, Any] | None = None,
 ) -> str:
     """Render a cover letter LaTeX document from CoverLetterContent JSON."""
     language = (content.get("language") or "english").lower()
@@ -109,32 +220,33 @@ def render_cover_letter_tex(
     paragraphs.append(content.get("closing_paragraph", ""))
     paragraphs = [p for p in paragraphs if isinstance(p, str) and p.strip()]
 
+    header = _cover_letter_context(cv_data, job_data, applicant_name, applicant_contact)
+
     if is_german:
-        recipient = recipient_info.strip() if recipient_info else "Hiring Manager"
-        if recipient and recipient != "Hiring Manager":
-            salutation = f"Sehr geehrte/r {recipient},"
-        else:
-            salutation = "Sehr geehrte Damen und Herren,"
+        salutation = _cover_letter_salutation(recipient_info, is_german=True)
         template_name = "cover_letter_de.tex.j2"
         extra = {
             "betreff": content.get("betreff", ""),
-            "grussformel": content.get("grussformel", "Mit freundlichen Grüßen"),
+            "sign_off": content.get("grussformel", "Mit freundlichen Grüßen"),
             "salutation": salutation,
+            "document_title": "ANSCHREIBEN",
+            "date_label": "Datum:",
         }
     else:
         template_name = "cover_letter.tex.j2"
         extra = {
-            "salutation": f"Dear {recipient_info or 'Hiring Manager'},",
-            "closing": "Sincerely,",
+            "salutation": _cover_letter_salutation(recipient_info, is_german=False),
+            "sign_off": "Yours Faithfully",
+            "document_title": "COVER LETTER",
+            "date_label": "Date:",
         }
 
     env = _jinja_env()
     template = env.get_template(template_name)
     return template.render(
-        applicant_name=applicant_name,
-        applicant_contact=applicant_contact,
         current_date=_format_date(language),
         paragraphs=paragraphs,
+        **header,
         **extra,
     )
 
