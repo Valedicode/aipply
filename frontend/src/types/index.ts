@@ -97,6 +97,7 @@ export interface JobRequirements {
   responsibilities: string[];
   qualifications: string[];
   key_requirements: string[];
+  recipient_name?: string;
 }
 
 export interface JobExtractionResponse {
@@ -298,7 +299,7 @@ export interface TranslationResponse {
 
 export type OrchestratorFlow = 'job_tailoring' | 'cv_review' | 'discovery';
 
-export type OrchestratorGateKind = 'approval' | 'choice';
+export type OrchestratorGateKind = 'approval' | 'choice' | 'input';
 
 export type OrchestratorGateAction = 'approve' | 'reject' | 'edit' | 'choose';
 

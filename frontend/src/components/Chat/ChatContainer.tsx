@@ -4,6 +4,7 @@ import { ChatInput } from './ChatInput';
 import { EmptyState } from './EmptyState';
 import { ApprovalGate } from './ApprovalGate';
 import { ChoiceGate } from './ChoiceGate';
+import { InputGate } from './InputGate';
 
 interface ChatContainerProps {
   messages: Message[];
@@ -98,6 +99,12 @@ export const ChatContainer = ({
         <div className="border-t border-slate-200 bg-slate-50 px-6 py-4 dark:border-slate-700 dark:bg-slate-900/40">
           {pendingGate.kind === 'choice' ? (
             <ChoiceGate
+              gate={pendingGate}
+              isLoading={isLoading}
+              onSubmit={onSubmitGateResolution}
+            />
+          ) : pendingGate.kind === 'input' ? (
+            <InputGate
               gate={pendingGate}
               isLoading={isLoading}
               onSubmit={onSubmitGateResolution}
