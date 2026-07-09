@@ -185,6 +185,13 @@ class JobRequirements(BaseModel):
     responsibilities: List[str] = Field(description="Key responsibilities")
     qualifications: List[str] = Field(default=[], description="Required qualifications")
     key_requirements: List[str] = Field(description="Critical must-have requirements")
+    recipient_name: Optional[str] = Field(
+        default=None,
+        description=(
+            "Named contact or hiring manager from the posting, if explicitly stated "
+            "(e.g. 'Contact: Jane Smith'). Leave empty when not mentioned."
+        ),
+    )
 
 
 class JobExtractionResponse(BaseModel):
@@ -435,9 +442,12 @@ class GenerateCoverLetterRequest(BaseModel):
         description="Desired filename for PDF",
         example="john_doe_cover_letter.pdf"
     )
-    recipient_info: str = Field(
-        default="Hiring Manager",
-        description="Who the letter is addressed to"
+    recipient_info: Optional[str] = Field(
+        default=None,
+        description=(
+            "Who the letter is addressed to. Required unless recipient_name "
+            "was extracted from the job posting."
+        ),
     )
 
 
@@ -504,7 +514,7 @@ class GeneratedFile(BaseModel):
 class OrchestratorGatePayload(BaseModel):
     """Public shape of a pending human-in-the-loop gate."""
     step: str = Field(description="Stable gate identifier")
-    kind: Literal["approval", "choice"] = Field(description="Gate kind")
+    kind: Literal["approval", "choice", "input"] = Field(description="Gate kind")
     narration: str = Field(description="Assistant text for this gate")
     preview: Dict[str, Any] = Field(default_factory=dict, description="Structured artifact under review")
     allowed_actions: List[Literal["approve", "reject", "edit", "choose"]] = Field(
