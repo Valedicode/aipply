@@ -331,8 +331,10 @@ def generate_cover_letter_pdf(
     content_json: str,
     output_filename: str,
     applicant_name: str,
-    applicant_contact: str,
-    recipient_info: str = "Hiring Manager",
+    applicant_contact: str = "",
+    recipient_info: str = "",
+    cv_json: str = "",
+    job_json: str = "",
 ) -> str:
     """
     Generate cover letter PDF from structured content via LaTeX.
@@ -361,11 +363,32 @@ def generate_cover_letter_pdf(
                 f"{', '.join(missing_fields)}"
             )
 
+        if not (recipient_info and recipient_info.strip()):
+            return (
+                "Error: recipient_info is required. Extract it from the job posting "
+                "or ask the user who the letter should be addressed to."
+            )
+
+        cv_data: dict[str, Any] = {}
+        job_data: dict[str, Any] | None = None
+        if cv_json and cv_json.strip():
+            try:
+                cv_data = json.loads(cv_json)
+            except json.JSONDecodeError:
+                cv_data = {}
+        if job_json and job_json.strip():
+            try:
+                job_data = json.loads(job_json)
+            except json.JSONDecodeError:
+                job_data = None
+
         tex_content = render_cover_letter_tex(
             content,
             applicant_name=applicant_name,
             applicant_contact=applicant_contact,
             recipient_info=recipient_info,
+            cv_data=cv_data if isinstance(cv_data, dict) else {},
+            job_data=job_data if isinstance(job_data, dict) else None,
         )
         output_dir = DEFAULT_OUTPUT_DIR
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -1009,7 +1032,7 @@ STANDARD WORKFLOW (alternative, simpler approach):
      * output_filename: e.g., "firstname_lastname_cover_letter.pdf" or "firstname_lastname_anschreiben.pdf" for German
      * applicant_name: Extract from CV data (e.g., cv_data['name'])
      * applicant_contact: Format as "email | phone" from CV data (e.g., "john@email.com | (123) 456-7890")
-     * recipient_info: Extract from job data or use "Hiring Manager" (for German, this will be used in the Anrede)
+     * recipient_info: Extract recipient_name from job data when present; otherwise ask the user. Never use a generic default.
    - When generating both formats, call BOTH tools and include BOTH success messages in your response
 
 CRITICAL PRINCIPLES:

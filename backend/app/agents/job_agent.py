@@ -55,7 +55,7 @@ def retrieve_web(web_urls: list[str]) -> str:
     text_content = "\n\n".join([page.page_content for page in docs])
     llm = ChatOpenAI(model="gpt-4o-mini")
     prompt = ChatPromptTemplate.from_messages([
-       ("system", "Extract structured job information from the provided job posting. Focus on identifying all required skills, responsibilities, qualifications, and key requirements."),
+       ("system", "Extract structured job information from the provided job posting. Focus on identifying all required skills, responsibilities, qualifications, and key requirements. If the posting names a contact person, hiring manager, or recruiter to address applications to, capture their name in recipient_name; otherwise leave recipient_name empty."),
        ("user", "Here are the pages necessary for application {pages}")
     ])
     structured_llm = llm.with_structured_output(JobRequirements)
@@ -76,7 +76,7 @@ def retrieve_text(info: str) -> str:
     """
     llm = ChatOpenAI(model="gpt-4o-mini")
     prompt = ChatPromptTemplate.from_messages([
-       ("system", "Extract structured job information from the provided input text. Focus on identifying all required skills, responsibilities, qualifications, and key requirements."),
+       ("system", "Extract structured job information from the provided input text. Focus on identifying all required skills, responsibilities, qualifications, and key requirements. If the posting names a contact person, hiring manager, or recruiter to address applications to, capture their name in recipient_name; otherwise leave recipient_name empty."),
        ("user", "Here is the text necessary for application {text}")
     ])
     structured_llm = llm.with_structured_output(JobRequirements)
