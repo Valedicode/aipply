@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from app.services.latex_renderer import latex_escape, render_cv_tex
+import pytest
+
+from app.services.latex_renderer import latex_escape, render_cover_letter_tex, render_cv_tex
 from app.services.resume_adapter import build_harvard_sections, to_json_resume
 
 
@@ -83,3 +85,71 @@ def test_build_harvard_sections_respects_section_order():
     }
     _, sections = build_harvard_sections(cv, section_order=["skills", "experience", "education"])
     assert [s["type"] for s in sections] == ["skills", "work", "education"]
+
+
+def test_render_cover_letter_tex_uses_entry_level_header_layout():
+    content = {
+        "language": "english",
+        "opening_paragraph": "I am excited to apply.",
+        "body_paragraph_1": "My experience aligns well.",
+        "body_paragraph_2": "I bring strong ML skills.",
+        "closing_paragraph": "Thank you for your consideration.",
+    }
+    cv = {
+        "name": "Kevin Ha",
+        "email": "kevin@example.com",
+        "phone": "+49 123 456",
+        "linkedin_url": "https://linkedin.com/in/kevinha",
+        "github_url": "https://github.com/Valedicode",
+    }
+    job = {"job_title": "ML Engineer"}
+    tex = render_cover_letter_tex(
+        content,
+        applicant_name="Kevin Ha",
+        recipient_info="Dr. Jane Smith",
+        cv_data=cv,
+        job_data=job,
+    )
+    assert "\\documentclass[11pt,a4paper]{article}" in tex
+    assert "COVER LETTER" in tex
+    assert "Kevin Ha" in tex
+    assert "ML Engineer" in tex
+    assert "kevin@example.com" in tex
+    assert "linkedin.com/in/kevinha" in tex
+    assert "Yours Faithfully" in tex
+    assert "Dear Dr. Jane Smith" in tex
+
+
+def test_render_cover_letter_tex_requires_recipient():
+    content = {
+        "language": "english",
+        "opening_paragraph": "I am excited to apply.",
+        "body_paragraph_1": "My experience aligns well.",
+        "body_paragraph_2": "I bring strong ML skills.",
+        "closing_paragraph": "Thank you for your consideration.",
+    }
+    with pytest.raises(ValueError, match="recipient_info is required"):
+        render_cover_letter_tex(content, applicant_name="Kevin Ha", recipient_info="")
+
+
+def test_render_cover_letter_tex_german_includes_betreff():
+    content = {
+        "language": "german",
+        "betreff": "Bewerbung als Softwareentwickler",
+        "opening_paragraph": "mit großem Interesse bewerbe ich mich.",
+        "body_paragraph_1": "Erster Absatz.",
+        "body_paragraph_2": "Zweiter Absatz.",
+        "closing_paragraph": "Ich freue mich auf Ihre Rückmeldung.",
+        "grussformel": "Mit freundlichen Grüßen",
+    }
+    tex = render_cover_letter_tex(
+        content,
+        applicant_name="Max Mustermann",
+        recipient_info="Frau Müller",
+        cv_data={"name": "Max Mustermann", "email": "max@example.com"},
+        job_data={"job_title": "Softwareentwickler"},
+    )
+    assert "ANSCHREIBEN" in tex
+    assert "Betreff:" in tex
+    assert "Bewerbung als Softwareentwickler" in tex
+    assert "Mit freundlichen Grüßen" in tex

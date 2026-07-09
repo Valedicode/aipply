@@ -68,6 +68,7 @@ JOB = {
     "responsibilities": ["Build new things"],
     "qualifications": [],
     "key_requirements": ["5+ yoe"],
+    "recipient_name": "Dr. Jane Smith",
 }
 
 JOB_SUMMARY = {
@@ -301,6 +302,35 @@ def test_reject_at_present_score_terminates_without_files(graph, patched_tools):
     state = graph.get_state(config).values
     assert state.get("generated_files") in (None, [])
     assert "Stopped" in state["last_narration"]
+
+
+def test_missing_recipient_prompts_input_gate(graph, patched_tools):
+    """When the job posting has no named contact, ask the user for the recipient."""
+    config = {"configurable": {"thread_id": "test-recipient-gate"}}
+    job_without_recipient = {k: v for k, v in JOB.items() if k != "recipient_name"}
+
+    graph.invoke(
+        {"flow": "job_tailoring", "cv_data": CV, "job_data": job_without_recipient},
+        config=config,
+    )
+    graph.invoke(Command(resume={"action": "approve"}), config=config)
+    graph.invoke(Command(resume={"action": "approve"}), config=config)
+    graph.invoke(Command(resume={"action": "approve"}), config=config)
+    result = graph.invoke(Command(resume={"action": "choose", "choice": "english"}), config=config)
+
+    payload = _interrupt_payload(result)
+    assert payload["step"] == "cover_letter_recipient"
+    assert payload["kind"] == "input"
+
+    result = graph.invoke(
+        Command(resume={"action": "edit", "feedback": "Dr. Jane Smith"}),
+        config=config,
+    )
+    payload = _interrupt_payload(result)
+    assert payload["step"] == "approve_cover_letter"
+
+    state = graph.get_state(config).values
+    assert state["cover_letter_recipient"] == "Dr. Jane Smith"
 
 
 def test_skip_cover_letter_after_cv_generation(graph, patched_tools):
