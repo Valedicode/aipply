@@ -24,6 +24,7 @@ from app.agents.writer_agent import (
     generate_cover_letter_pdf,
     generate_cv_pdf,
 )
+from app.services.latex_renderer import extract_recipient_name
 from app.models.schemas import (
     CoverLetterContent,
     CVJobAlignmentRequest,
@@ -233,12 +234,27 @@ async def generate_cover_letter(request: GenerateCoverLetterRequest):
         applicant_phone = request.cv_data.get('phone', '')
         applicant_contact = f"{applicant_email} | {applicant_phone}"
 
+        recipient_info = (
+            (request.recipient_info or "").strip()
+            or extract_recipient_name(request.job_data)
+        )
+        if not recipient_info:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "recipient_info is required when the job posting does not name "
+                    "a contact person."
+                ),
+            )
+
         pdf_result = generate_cover_letter_pdf.invoke({
             "content_json": content_json,
             "output_filename": request.output_filename,
             "applicant_name": applicant_name,
             "applicant_contact": applicant_contact,
-            "recipient_info": request.recipient_info,
+            "recipient_info": recipient_info,
+            "cv_json": cv_json,
+            "job_json": job_json,
         })
 
         if "Error" in pdf_result:
