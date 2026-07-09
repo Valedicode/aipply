@@ -1,40 +1,80 @@
-\documentclass[12pt,a4paper]{article}
-\usepackage[utf8]{inputenc}
-\usepackage[T1]{fontenc}
-\usepackage[ngerman]{babel}
-\usepackage[margin=2.5cm]{geometry}
-\usepackage{setspace}
-\usepackage{parskip}
+% Entry-level cover letter layout — German variant (adapted for Tectonic / pdfLaTeX).
+\documentclass[11pt,a4paper]{article}
 
+\usepackage{latexsym}
+\usepackage[empty]{fullpage}
+\usepackage[margin=1cm]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[ngerman]{babel}
+\usepackage{xcolor}
+\usepackage[hidelinks]{hyperref}
+\usepackage{fancyhdr}
+\usepackage{setspace}
+\usepackage{ragged2e}
+
+\definecolor{UI_blue}{RGB}{32, 64, 151}
+\definecolor{HF_color}{RGB}{179, 179, 179}
+
+\pagestyle{fancy}
+\fancyhf{}
+\fancyfoot{}
+\renewcommand{\headrulewidth}{0pt}
+\renewcommand{\footrulewidth}{0pt}
+\urlstyle{same}
+\raggedbottom
+\raggedright
 \setlength{\parindent}{0pt}
-\onehalfspacing
+{% raw %}\rfoot{{\color{HF_color} \thepage\ of\ 1, Aktualisiert am \today}}{% endraw %}
 
 \begin{document}
 
-{\large\bfseries {{ applicant_name | latex_escape }} \par}
-{{ applicant_contact | latex_escape }} \par
+\begin{center}
+    \begin{minipage}[b]{0.24\textwidth}
+        \raggedright
+        {% if phone %}\large {{ phone | latex_escape }} \\{% endif %}
+        {% if email %}\large \href{mailto:{{ email }}}{ {{- email | latex_escape -}} }{% endif %}
+    \end{minipage}%
+    \begin{minipage}[b]{0.5\textwidth}
+        \centering
+        {\Huge {{ name | latex_escape }}} \\[0.1cm]
+        {% if target_job %}{\color{UI_blue}\Large {{ target_job | latex_escape }}}{% endif %}
+    \end{minipage}%
+    \begin{minipage}[b]{0.24\textwidth}
+        \raggedleft\large
+        {% if link_1_url %}\href{ {{- link_1_url | latex_url -}} }{ {{- link_1_label | latex_escape -}} } \\{% endif %}
+        {% if link_2_url %}\href{ {{- link_2_url | latex_url -}} }{ {{- link_2_label | latex_escape -}} }{% endif %}
+    \end{minipage}
 
-\vspace{1.5em}
-{{ current_date | latex_escape }} \par
+    \vspace{-0.15cm}
+    {\color{UI_blue}\hrulefill}
+\end{center}
 
+\justifying
+\setlength{\parskip}{12pt}
+\vspace{0.2cm}
+
+\begin{center}
+    {\color{UI_blue}\Large {{ document_title | latex_escape }}}
+\end{center}
+
+{{ date_label | latex_escape }} {{ current_date | latex_escape }}\par
 {% if betreff %}
-\vspace{1.5em}
-\textbf{Betreff:} {{ betreff | latex_escape }} \par
+\vspace{0.2cm}
+\textbf{Betreff:} {{ betreff | latex_escape }}\par
 {% endif %}
+\vspace{-0.1cm}
+{{ salutation | latex_escape }}\par
 
-\vspace{1.5em}
-{{ salutation | latex_escape }} \par
-
-\vspace{1em}
 {% for paragraph in paragraphs %}
-{{ paragraph | latex_escape }} \par
-\vspace{0.8em}
+{{ paragraph | latex_escape }}\par
 {% endfor %}
 
-\vspace{1em}
-{{ grussformel | latex_escape }} \par
-
-\vspace{2.5em}
-{{ applicant_name | latex_escape }} \par
+\vspace{0.5cm}
+\raggedright
+{{ sign_off | latex_escape }} \\
+{{ name | latex_escape }} \\
+{% if phone %}{{ phone | latex_escape }} \\{% endif %}
+{% if email %}\href{mailto:{{ email }}}{ {{- email | latex_escape -}} }{% endif %}
 
 \end{document}
