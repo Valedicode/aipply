@@ -33,6 +33,7 @@ to inject deterministic stubs without touching ``langchain_openai`` directly.
 from __future__ import annotations
 
 import json
+import re
 from typing import Any, Literal
 
 from langchain_core.messages import AIMessage
@@ -42,6 +43,7 @@ from pydantic import BaseModel, Field, ConfigDict
 
 from app.agents.orchestrator.gates import GatePayload, GateResolution
 from app.agents.orchestrator.state import OrchestratorState
+from app.agents.writer_agent import generate_cv_pdf
 from app.openai_llm import chat_openai_mini
 
 
@@ -62,6 +64,7 @@ CR_STEP5_SKILLS_PROJECTS = "cr_step5_skills_projects"
 CR_GATE_SKILLS_PROJECTS = "cr_gate_skills_projects"
 CR_STEP6_ASSESSMENT = "cr_step6_assessment"
 CR_GATE_ASSESSMENT = "cr_gate_assessment"
+CR_STEP7_FINALIZE = "cr_step7_finalize_cv"
 
 # Kept for backwards compatibility with the earlier stub. The graph builder
 # uses CR_ENTRY now; CR_STUB is intentionally not registered as a node any
@@ -799,11 +802,229 @@ def cr_gate_assessment(state: OrchestratorState) -> Command:
     raw = interrupt(payload)
     resolution = GateResolution.model_validate(raw)
     if resolution.action == "approve":
-        return Command(
-            update=_narrate({}, "CV review complete. The full per-section review is available in the response."),
-            goto=END,
-        )
+        return Command(update={"pending_gate": None}, goto=CR_STEP7_FINALIZE)
     return Command(update=_narrate({}, "CV review ended without a final assessment."), goto=END)
+
+
+# --------------------------------------------------------------------------- #
+# Step 7: assemble the revised CV from approved section reviews and export a
+# downloadable PDF. Runs automatically once the assessment gate is approved;
+# no further gate follows.
+# --------------------------------------------------------------------------- #
+
+def _extract_filename(tool_message: str) -> str | None:
+    """Pull a filename out of a generate_* tool success message."""
+    match = re.search(r"The file '([^']+)' is ready for download", tool_message or "")
+    return match.group(1) if match else None
+
+
+def _apply_education_review(education: list[Any], review: dict[str, Any]) -> list[Any]:
+    improved = [e for e in (review.get("improved_entries") or []) if isinstance(e, str) and e.strip()]
+    # Rewritten entries are flat strings; only swap them in when the original
+    # entries are also strings, otherwise we'd destroy the structured
+    # institution/degree/dates fields the LaTeX template relies on.
+    if (
+        improved
+        and len(improved) == len(education)
+        and all(isinstance(e, str) for e in education)
+    ):
+        return improved
+    return list(education)
+
+
+def _apply_experience_review(experience: list[Any], review: dict[str, Any]) -> list[Any]:
+    rewrites: dict[str, str] = {}
+    for item in review.get("rewritten_bullets") or []:
+        if not isinstance(item, dict):
+            continue
+        original, rewritten = item.get("original"), item.get("rewritten")
+        if isinstance(original, str) and isinstance(rewritten, str) and original.strip():
+            rewrites[original.strip()] = rewritten
+    to_remove = {
+        text.strip() for text in (review.get("weak_bullets_to_remove") or []) if isinstance(text, str)
+    }
+    if not rewrites and not to_remove:
+        return list(experience)
+
+    new_experience = []
+    for role in experience:
+        if not isinstance(role, dict):
+            new_experience.append(role)
+            continue
+        role = dict(role)
+        new_responsibilities = []
+        for bullet in role.get("responsibilities") or []:
+            if not isinstance(bullet, str):
+                new_responsibilities.append(bullet)
+                continue
+            key = bullet.strip()
+            if key in to_remove:
+                continue
+            new_responsibilities.append(rewrites.get(key, bullet))
+        role["responsibilities"] = new_responsibilities
+        new_experience.append(role)
+    return new_experience
+
+
+def _activity_label(activity: Any) -> str:
+    """Comparable text for an activity: the string itself, or role+organization
+    for structured LeadershipEntry dicts."""
+    if isinstance(activity, str):
+        return activity.strip().lower()
+    if isinstance(activity, dict):
+        parts = [activity.get("role"), activity.get("organization"), activity.get("description")]
+        return " ".join(p.strip() for p in parts if isinstance(p, str) and p.strip()).lower()
+    return ""
+
+
+def _apply_leadership_review(activities: list[Any], review: dict[str, Any]) -> list[Any]:
+    emphasize = [a for a in (review.get("activities_to_emphasize") or []) if isinstance(a, str) and a.strip()]
+    remove = [a.strip().lower() for a in (review.get("activities_to_remove") or []) if isinstance(a, str) and a.strip()]
+
+    def _is_removed(activity: Any) -> bool:
+        label = _activity_label(activity)
+        return bool(label) and any(r in label or label in r for r in remove)
+
+    kept = [a for a in activities if not _is_removed(a)]
+    if not emphasize:
+        return kept
+
+    ordered: list[Any] = []
+    remaining = list(kept)
+    for label in emphasize:
+        lbl = label.strip().lower()
+        for activity in list(remaining):
+            activity_label = _activity_label(activity)
+            if activity_label and (lbl in activity_label or activity_label in lbl):
+                ordered.append(activity)
+                remaining.remove(activity)
+                break
+    ordered.extend(remaining)
+    return ordered
+
+
+def _apply_skills_projects_review(
+    skills: list[Any],
+    projects: list[Any],
+    review: dict[str, Any],
+) -> tuple[list[Any], list[Any]]:
+    skill_groups = review.get("skill_groups") or []
+    to_remove_skills = {
+        s.strip().lower() for s in (review.get("skills_to_remove") or []) if isinstance(s, str)
+    }
+
+    # Preserve the reviewer's grouping: emit JSON Resume-style skill dicts
+    # ({"name", "keywords"}) that the LaTeX adapter renders as labelled rows.
+    new_skills: list[Any] = []
+    if skill_groups:
+        for group in skill_groups:
+            if not isinstance(group, dict):
+                continue
+            kept = [
+                skill for skill in (group.get("skills") or [])
+                if isinstance(skill, str) and skill.strip().lower() not in to_remove_skills
+            ]
+            if kept:
+                new_skills.append({"name": group.get("name") or "Skills", "keywords": kept})
+    if not new_skills:
+        new_skills = [s for s in skills if not (isinstance(s, str) and s.strip().lower() in to_remove_skills)]
+
+    projects_to_remove = {
+        p.strip().lower() for p in (review.get("projects_to_remove") or []) if isinstance(p, str)
+    }
+    refined = {
+        item.get("project", "").strip().lower(): item.get("description")
+        for item in (review.get("refined_project_descriptions") or [])
+        if isinstance(item, dict) and isinstance(item.get("project"), str)
+    }
+    ranking = [p.strip().lower() for p in (review.get("project_ranking") or []) if isinstance(p, str)]
+
+    def _project_name(proj: Any) -> str:
+        return str(proj.get("name") or "").strip().lower() if isinstance(proj, dict) else ""
+
+    filtered_projects = []
+    for proj in projects:
+        name_key = _project_name(proj)
+        if name_key and any(r in name_key or name_key in r for r in projects_to_remove):
+            continue
+        if isinstance(proj, dict):
+            proj = dict(proj)
+            for r_name, r_desc in refined.items():
+                if r_name and (r_name in name_key or name_key in r_name) and isinstance(r_desc, str) and r_desc.strip():
+                    proj["description"] = r_desc
+                    break
+        filtered_projects.append(proj)
+
+    if ranking:
+        def _rank_key(proj: Any) -> int:
+            name_key = _project_name(proj)
+            for idx, r in enumerate(ranking):
+                if r and (r in name_key or name_key in r):
+                    return idx
+            return len(ranking)
+        filtered_projects.sort(key=_rank_key)
+
+    return new_skills, filtered_projects
+
+
+def _assemble_reviewed_cv(state: OrchestratorState) -> dict[str, Any]:
+    """Fold the approved per-section reviews back into the original cv_data."""
+    cv_data = dict(state.get("cv_data") or {})
+    reviews = state.get("review_outputs") or {}
+
+    if cv_data.get("education"):
+        cv_data["education"] = _apply_education_review(cv_data["education"], reviews.get("education") or {})
+    if cv_data.get("experience"):
+        cv_data["experience"] = _apply_experience_review(cv_data["experience"], reviews.get("experience") or {})
+    if cv_data.get("leadership_activities"):
+        cv_data["leadership_activities"] = _apply_leadership_review(
+            cv_data["leadership_activities"], reviews.get("leadership") or {}
+        )
+
+    skills_projects_review = reviews.get("skills_projects") or {}
+    new_skills, new_projects = _apply_skills_projects_review(
+        cv_data.get("skills") or [], cv_data.get("projects") or [], skills_projects_review
+    )
+    cv_data["skills"] = new_skills
+    cv_data["projects"] = new_projects
+
+    return cv_data
+
+
+def cr_step7_finalize(state: OrchestratorState) -> dict[str, Any]:
+    """Assemble the revised CV and export a downloadable PDF via LaTeX."""
+    revised_cv = _assemble_reviewed_cv(state)
+    applicant_name = revised_cv.get("name", "Applicant")
+    slug = re.sub(r"[^a-zA-Z0-9]+", "_", str(applicant_name or "applicant")).strip("_").lower() or "applicant"
+    pdf_name = f"{slug}_cv_reviewed.pdf"
+
+    generated = list(state.get("generated_files") or [])
+    pdf_msg = generate_cv_pdf.invoke({
+        "cv_json": json.dumps(revised_cv, default=str),
+        "output_filename": pdf_name,
+        "applicant_name": applicant_name,
+    })
+    if isinstance(pdf_msg, str) and "Error" not in pdf_msg:
+        filename = _extract_filename(pdf_msg) or pdf_name
+        generated.append({
+            "filename": filename,
+            "file_type": "cv",
+            "download_url": f"/api/files/{filename}",
+        })
+        narration = (
+            "CV review complete. I've applied the approved suggestions and generated "
+            f"a revised CV PDF: {filename}."
+        )
+    else:
+        narration = (
+            "CV review complete, but I ran into a problem generating the revised PDF: "
+            f"{pdf_msg}"
+        )
+
+    return _narrate(
+        {"cv_data": revised_cv, "generated_files": generated},
+        narration,
+    )
 
 
 # Backwards-compat shim. Some older imports referenced cv_review_stub; keep

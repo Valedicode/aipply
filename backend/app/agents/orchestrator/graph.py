@@ -39,6 +39,7 @@ from app.agents.orchestrator.nodes_cv_review import (
     CR_STEP4_LEADERSHIP,
     CR_STEP5_SKILLS_PROJECTS,
     CR_STEP6_ASSESSMENT,
+    CR_STEP7_FINALIZE,
     cr_entry,
     cr_gate_assessment,
     cr_gate_education,
@@ -52,6 +53,7 @@ from app.agents.orchestrator.nodes_cv_review import (
     cr_step4_leadership,
     cr_step5_skills_projects,
     cr_step6_assessment,
+    cr_step7_finalize,
 )
 from app.agents.orchestrator.nodes_discovery import DISC_STUB, discovery_stub
 from app.agents.orchestrator.nodes_job_tailoring import (
@@ -60,7 +62,8 @@ from app.agents.orchestrator.nodes_job_tailoring import (
     JT_GATE_APPROVE_REWRITE,
     JT_GATE_APPROVE_SELECTION,
     JT_GATE_COVER_LETTER,
-    JT_GATE_EXPORT_FORMAT,
+    JT_GATE_COVER_LETTER_RECIPIENT,
+    JT_STEP_SET_COVER_LETTER_RECIPIENT,
     JT_GATE_PRESENT_SCORE,
     JT_STEP1_SUMMARIZE,
     JT_STEP2_COMPATIBILITY,
@@ -76,7 +79,7 @@ from app.agents.orchestrator.nodes_job_tailoring import (
     jt_gate_approve_rewrite,
     jt_gate_approve_selection,
     jt_gate_cover_letter,
-    jt_gate_export_format,
+    jt_gate_cover_letter_recipient,
     jt_gate_present_score,
     jt_step1_summarize_job,
     jt_step2_compute_compatibility,
@@ -87,6 +90,7 @@ from app.agents.orchestrator.nodes_job_tailoring import (
     jt_step7_generate_cv_files,
     jt_step8_cover_letter_content,
     jt_step9_cover_letter_files,
+    jt_step_set_cover_letter_recipient,
 )
 from app.agents.orchestrator.state import OrchestratorState
 from app.services.graph_checkpointer import get_checkpointer
@@ -138,6 +142,7 @@ def build_graph(checkpointer: BaseCheckpointSaver | None = None):
     graph.add_node(CR_GATE_SKILLS_PROJECTS, cr_gate_skills_projects)
     graph.add_node(CR_STEP6_ASSESSMENT, cr_step6_assessment)
     graph.add_node(CR_GATE_ASSESSMENT, cr_gate_assessment)
+    graph.add_node(CR_STEP7_FINALIZE, cr_step7_finalize)
 
     # --- job-tailoring step nodes --------------------------------------------
     graph.add_node(JT_STEP1_SUMMARIZE, jt_step1_summarize_job)
@@ -147,6 +152,8 @@ def build_graph(checkpointer: BaseCheckpointSaver | None = None):
     graph.add_node(JT_STEP5_REWRITE, jt_step5_rewrite_enhance)
     graph.add_node(JT_STEP6_ASSEMBLE, jt_step6_assemble_cv)
     graph.add_node(JT_STEP7_GENERATE_CV_FILES, jt_step7_generate_cv_files)
+    graph.add_node(JT_STEP_SET_COVER_LETTER_RECIPIENT, jt_step_set_cover_letter_recipient)
+    graph.add_node(JT_GATE_COVER_LETTER_RECIPIENT, jt_gate_cover_letter_recipient)
     graph.add_node(JT_STEP8_COVER_LETTER_CONTENT, jt_step8_cover_letter_content)
     graph.add_node(JT_STEP9_COVER_LETTER_FILES, jt_step9_cover_letter_files)
 
@@ -154,7 +161,6 @@ def build_graph(checkpointer: BaseCheckpointSaver | None = None):
     graph.add_node(JT_GATE_PRESENT_SCORE, jt_gate_present_score)
     graph.add_node(JT_GATE_APPROVE_SELECTION, jt_gate_approve_selection)
     graph.add_node(JT_GATE_APPROVE_REWRITE, jt_gate_approve_rewrite)
-    graph.add_node(JT_GATE_EXPORT_FORMAT, jt_gate_export_format)
     graph.add_node(JT_GATE_COVER_LETTER, jt_gate_cover_letter)
     graph.add_node(JT_GATE_APPROVE_COVER_LETTER, jt_gate_approve_cover_letter)
 
@@ -179,10 +185,10 @@ def build_graph(checkpointer: BaseCheckpointSaver | None = None):
     # JT_GATE_APPROVE_SELECTION returns Command(goto=JT_STEP5_REWRITE | JT_STEP4_SELECT | END)
     graph.add_edge(JT_STEP5_REWRITE, JT_GATE_APPROVE_REWRITE)
     # JT_GATE_APPROVE_REWRITE returns Command(goto=JT_STEP6_ASSEMBLE | JT_STEP5_REWRITE | END)
-    graph.add_edge(JT_STEP6_ASSEMBLE, JT_GATE_EXPORT_FORMAT)
-    # JT_GATE_EXPORT_FORMAT returns Command(goto=JT_STEP7_GENERATE_CV_FILES | JT_GATE_COVER_LETTER)
+    graph.add_edge(JT_STEP6_ASSEMBLE, JT_STEP7_GENERATE_CV_FILES)
     graph.add_edge(JT_STEP7_GENERATE_CV_FILES, JT_GATE_COVER_LETTER)
-    # JT_GATE_COVER_LETTER returns Command(goto=JT_STEP8_COVER_LETTER_CONTENT | END)
+    # JT_GATE_COVER_LETTER returns Command(goto=JT_STEP_SET_COVER_LETTER_RECIPIENT | END)
+    # JT_STEP_SET_COVER_LETTER_RECIPIENT / JT_GATE_COVER_LETTER_RECIPIENT route via Command
     graph.add_edge(JT_STEP8_COVER_LETTER_CONTENT, JT_GATE_APPROVE_COVER_LETTER)
     # JT_GATE_APPROVE_COVER_LETTER returns Command(goto=JT_STEP9_COVER_LETTER_FILES | JT_STEP8... | END)
     graph.add_edge(JT_STEP9_COVER_LETTER_FILES, END)
@@ -197,7 +203,8 @@ def build_graph(checkpointer: BaseCheckpointSaver | None = None):
     graph.add_edge(CR_STEP4_LEADERSHIP, CR_GATE_LEADERSHIP)
     graph.add_edge(CR_STEP5_SKILLS_PROJECTS, CR_GATE_SKILLS_PROJECTS)
     graph.add_edge(CR_STEP6_ASSESSMENT, CR_GATE_ASSESSMENT)
-    # CR_GATE_ASSESSMENT routes to END on either branch via Command(goto=END).
+    # CR_GATE_ASSESSMENT routes to CR_STEP7_FINALIZE on approve, END on reject.
+    graph.add_edge(CR_STEP7_FINALIZE, END)
 
     # --- discovery stub ends immediately ------------------------------------
     graph.add_edge(DISC_STUB, END)

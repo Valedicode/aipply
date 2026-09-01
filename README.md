@@ -58,6 +58,7 @@ JobWriterAI's core agents:
 
 - [Conda](https://docs.conda.io/en/latest/miniconda.html) or [Miniconda](https://docs.conda.io/en/latest/miniconda.html) installed
 - Python 3.12 (recommended) or 3.11+ (managed by conda)
+- [Tectonic](https://tectonic-typesetting.github.io/) for LaTeX-to-PDF export (recommended), or a TeX distribution with `pdflatex` (`LATEX_COMPILER=pdflatex`)
 
 ### Backend setup
 

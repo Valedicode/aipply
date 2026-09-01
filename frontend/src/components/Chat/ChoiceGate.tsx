@@ -17,9 +17,6 @@ interface ChoiceGateProps {
 }
 
 const PRETTY_LABELS: Record<string, string> = {
-  pdf: 'PDF only',
-  docx: 'Word only',
-  both: 'PDF + Word',
   english: 'English',
   german: 'German (Anschreiben)',
   skip: 'Skip',

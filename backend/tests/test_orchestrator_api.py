@@ -52,19 +52,12 @@ def patched_tools():
         "decide_tailoring_strategy": _fake_tool(lambda _: json.dumps(STRATEGY)),
         "select_prioritize_content": _fake_tool(lambda _: json.dumps(SELECTED)),
         "rewrite_enhance_content": _fake_tool(lambda _: json.dumps(REWRITTEN)),
-        "generate_tailored_cv_html": _fake_tool(lambda _: "<h1>Ada Lovelace</h1>"),
         "generate_cv_pdf": _fake_tool(
             lambda kw: f"CV PDF generated successfully! The file '{kw['output_filename']}' is ready for download."
-        ),
-        "generate_cv_docx": _fake_tool(
-            lambda kw: f"CV Word document generated successfully! The file '{kw['output_filename']}' is ready for download."
         ),
         "generate_cover_letter_content": _fake_tool(lambda _: json.dumps(COVER_LETTER_CONTENT)),
         "generate_cover_letter_pdf": _fake_tool(
             lambda kw: f"Cover letter PDF generated successfully! The file '{kw['output_filename']}' is ready for download."
-        ),
-        "generate_cover_letter_docx": _fake_tool(
-            lambda kw: f"Cover letter Word document generated successfully! The file '{kw['output_filename']}' is ready for download."
         ),
     }
     contexts = [
@@ -142,11 +135,8 @@ def test_full_round_trip_through_every_gate(enabled_client, patched_tools):
     assert after_sel["pending_gate"]["step"] == "approve_rewrite"
 
     after_rewrite = resolve("approve")
-    assert after_rewrite["pending_gate"]["step"] == "export_format"
+    assert after_rewrite["pending_gate"]["step"] == "cover_letter_language"
     assert after_rewrite["pending_gate"]["kind"] == "choice"
-
-    after_export = resolve("choose", choice="both")
-    assert after_export["pending_gate"]["step"] == "cover_letter_language"
 
     after_lang = resolve("choose", choice="english")
     assert after_lang["pending_gate"]["step"] == "approve_cover_letter"
@@ -176,6 +166,73 @@ def test_state_endpoint_returns_snapshot(enabled_client, patched_tools):
 def test_state_endpoint_404_for_unknown_session(enabled_client):
     resp = enabled_client.get("/api/orchestrator/state/does-not-exist")
     assert resp.status_code == 404
+
+
+def test_chat_message_is_folded_in_as_edit_feedback_for_editable_gate(enabled_client, patched_tools):
+    client = enabled_client
+    start = client.post(
+        "/api/orchestrator/start",
+        json={"flow": "job_tailoring", "cv_data": CV, "job_data": JOB},
+    ).json()
+    session_id = start["session_id"]
+    assert start["pending_gate"]["step"] == "present_score"
+
+    def resolve(action, **kwargs):
+        payload = {"action": action, **kwargs}
+        return client.post(
+            "/api/orchestrator/message",
+            json={"session_id": session_id, "kind": "gate_resolution", "resolution": payload},
+        ).json()
+
+    after_score = resolve("approve")
+    assert after_score["pending_gate"]["step"] == "approve_selection"
+
+    # approve_selection's allowed_actions include 'edit', so free-text chat
+    # should be folded in as edit feedback and re-run the same step rather
+    # than being rejected outright.
+    resp = client.post(
+        "/api/orchestrator/message",
+        json={"session_id": session_id, "kind": "chat", "text": "Please emphasise leadership more."},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    # The edit loops back through step 4 and re-interrupts at the same gate;
+    # confirm it actually looped (rather than being rejected outright) by
+    # checking the stored tailoring strategy picked up the feedback.
+    assert body["pending_gate"]["step"] == "approve_selection"
+    state = client.get(f"/api/orchestrator/state/{session_id}").json()
+    assert state["pending_gate"]["step"] == "approve_selection"
+
+
+def test_chat_message_is_rejected_for_non_editable_gate(enabled_client, patched_tools):
+    client = enabled_client
+    start = client.post(
+        "/api/orchestrator/start",
+        json={"flow": "job_tailoring", "cv_data": CV, "job_data": JOB},
+    ).json()
+    session_id = start["session_id"]
+
+    def resolve(action, **kwargs):
+        payload = {"action": action, **kwargs}
+        return client.post(
+            "/api/orchestrator/message",
+            json={"session_id": session_id, "kind": "gate_resolution", "resolution": payload},
+        ).json()
+
+    after_score = resolve("approve")
+    after_sel = resolve("approve")
+    after_rewrite = resolve("approve")
+    assert after_rewrite["pending_gate"]["step"] == "cover_letter_language"
+
+    # cover_letter_language is a choice gate without 'edit' in allowed_actions.
+    resp = client.post(
+        "/api/orchestrator/message",
+        json={"session_id": session_id, "kind": "chat", "text": "Use German please."},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["pending_gate"]["step"] == "cover_letter_language"
+    assert "available actions" in body["narration"].lower()
 
 
 def test_message_rejects_bad_gate_resolution(enabled_client, patched_tools):

@@ -56,9 +56,7 @@ backend/__pycache__/
 backend/*.egg-info/
 backend/dist/
 backend/build/
-backend/data/*.pdf
-backend/data/*.docx
-backend/data/*.doc
+backend/data/
 
 # local document
 docs/

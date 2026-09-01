@@ -29,10 +29,50 @@ class ExperienceEntry(BaseModel):
 
     position: Optional[str] = Field(default=None, description="Job title or role")
     company: Optional[str] = Field(default=None, description="Employer name")
+    location: Optional[str] = Field(default=None, description="City/country of the role, e.g. 'Aachen, Germany'")
     duration: Optional[str] = Field(default=None, description="Employment dates or duration")
     responsibilities: List[str] = Field(
         default_factory=list,
         description="Bullet points describing achievements in this role",
+    )
+
+
+class EducationEntry(BaseModel):
+    """One education entry (one degree/program per entry)."""
+    model_config = ConfigDict(extra="forbid")
+
+    institution: Optional[str] = Field(default=None, description="School or university name")
+    degree: Optional[str] = Field(
+        default=None,
+        description="Degree or program, e.g. 'M.Sc. in Computer Science' or 'Higher School Certificate'",
+    )
+    location: Optional[str] = Field(default=None, description="City/country, e.g. 'Aachen, Germany'")
+    dates: Optional[str] = Field(
+        default=None,
+        description="Dates or graduation info as written, e.g. 'Expected: September 2027' or 'March 2026 -- August 2026'",
+    )
+    grade: Optional[str] = Field(
+        default=None,
+        description="Grade/GPA line if stated, e.g. '1.6 (German System)'",
+    )
+    details: List[str] = Field(
+        default_factory=list,
+        description="Extra lines such as awards, honors, or relevant coursework",
+    )
+
+
+class LeadershipEntry(BaseModel):
+    """One leadership / extracurricular / volunteer activity."""
+    model_config = ConfigDict(extra="forbid")
+
+    role: Optional[str] = Field(default=None, description="Role or position title")
+    organization: Optional[str] = Field(default=None, description="Organization or club name")
+    location: Optional[str] = Field(default=None, description="City/country if stated")
+    dates: Optional[str] = Field(default=None, description="Dates as written, e.g. 'October 2025 -- January 2026'")
+    description: Optional[str] = Field(default=None, description="Short description of the activity")
+    highlights: List[str] = Field(
+        default_factory=list,
+        description="Bullet points describing impact/responsibilities",
     )
 
 
@@ -69,15 +109,21 @@ class ResumeInfo(BaseModel):
         default=None,
         description="Personal portfolio or website URL"
     )
+    summary: Optional[str] = Field(
+        default=None,
+        description="Short professional summary / profile statement if present on the resume"
+    )
     skills: List[str] = Field(description="List of professional skills")
-    education: List[str] = Field(description="Educational qualifications")
+    education: List[EducationEntry] = Field(
+        description="Education entries with institution, degree, location, dates, and grade."
+    )
     experience: List[ExperienceEntry] = Field(
         description="Work experience entries with position, company, duration, and responsibilities."
     )
     projects: List[ProjectEntry] = Field(
         description="Project entries with name, description, technologies, and outcomes."
     )
-    leadership_activities: Optional[List[str]] = Field(
+    leadership_activities: Optional[List[LeadershipEntry]] = Field(
         default=[],
         description="Leadership roles, extracurricular activities, volunteer work, or other relevant activities"
     )
@@ -139,6 +185,13 @@ class JobRequirements(BaseModel):
     responsibilities: List[str] = Field(description="Key responsibilities")
     qualifications: List[str] = Field(default=[], description="Required qualifications")
     key_requirements: List[str] = Field(description="Critical must-have requirements")
+    recipient_name: Optional[str] = Field(
+        default=None,
+        description=(
+            "Named contact or hiring manager from the posting, if explicitly stated "
+            "(e.g. 'Contact: Jane Smith'). Leave empty when not mentioned."
+        ),
+    )
 
 
 class JobExtractionResponse(BaseModel):
@@ -376,7 +429,7 @@ class GenerateTailoredCVResponse(BaseModel):
     """Response from CV generation."""
     success: bool
     pdf_path: Optional[str] = None
-    html_preview: Optional[str] = None
+    latex_preview: Optional[str] = None
     message: str
 
 
@@ -389,9 +442,12 @@ class GenerateCoverLetterRequest(BaseModel):
         description="Desired filename for PDF",
         example="john_doe_cover_letter.pdf"
     )
-    recipient_info: str = Field(
-        default="Hiring Manager",
-        description="Who the letter is addressed to"
+    recipient_info: Optional[str] = Field(
+        default=None,
+        description=(
+            "Who the letter is addressed to. Required unless recipient_name "
+            "was extracted from the job posting."
+        ),
     )
 
 
@@ -458,7 +514,7 @@ class GeneratedFile(BaseModel):
 class OrchestratorGatePayload(BaseModel):
     """Public shape of a pending human-in-the-loop gate."""
     step: str = Field(description="Stable gate identifier")
-    kind: Literal["approval", "choice"] = Field(description="Gate kind")
+    kind: Literal["approval", "choice", "input"] = Field(description="Gate kind")
     narration: str = Field(description="Assistant text for this gate")
     preview: Dict[str, Any] = Field(default_factory=dict, description="Structured artifact under review")
     allowed_actions: List[Literal["approve", "reject", "edit", "choose"]] = Field(

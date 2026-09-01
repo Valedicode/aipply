@@ -30,15 +30,13 @@ from app.agents.orchestrator.state import OrchestratorState
 from app.agents.writer_agent import (
     decide_tailoring_strategy,
     generate_cover_letter_content,
-    generate_cover_letter_docx,
     generate_cover_letter_pdf,
-    generate_cv_docx,
     generate_cv_pdf,
     generate_job_summary,
-    generate_tailored_cv_html,
     rewrite_enhance_content,
     select_prioritize_content,
 )
+from app.services.latex_renderer import extract_recipient_name
 from app.agents.scoring_agent import calculate_compatibility_score_v2
 
 
@@ -58,9 +56,10 @@ JT_GATE_APPROVE_SELECTION = "jt_gate_approve_selection"
 JT_STEP5_REWRITE = "jt_step5_rewrite_enhance"
 JT_GATE_APPROVE_REWRITE = "jt_gate_approve_rewrite"
 JT_STEP6_ASSEMBLE = "jt_step6_assemble_cv"
-JT_GATE_EXPORT_FORMAT = "jt_gate_export_format"
 JT_STEP7_GENERATE_CV_FILES = "jt_step7_generate_cv_files"
 JT_GATE_COVER_LETTER = "jt_gate_cover_letter"
+JT_STEP_SET_COVER_LETTER_RECIPIENT = "jt_step_set_cover_letter_recipient"
+JT_GATE_COVER_LETTER_RECIPIENT = "jt_gate_cover_letter_recipient"
 JT_STEP8_COVER_LETTER_CONTENT = "jt_step8_cover_letter_content"
 JT_GATE_APPROVE_COVER_LETTER = "jt_gate_approve_cover_letter"
 JT_STEP9_COVER_LETTER_FILES = "jt_step9_cover_letter_files"
@@ -158,7 +157,7 @@ def _merge_rewrites_into_cv(
                 new_section.append(replace_text(item))
             elif isinstance(item, dict):
                 new_item = dict(item)
-                for bullet_field in ("responsibilities", "outcomes", "achievements"):
+                for bullet_field in ("responsibilities", "outcomes", "achievements", "highlights"):
                     val = new_item.get(bullet_field)
                     if isinstance(val, list):
                         new_item[bullet_field] = [
@@ -192,7 +191,7 @@ def _build_tailoring_plan_from_artifacts(
     ``generate_tailored_cv_html`` was designed for the old flow where a single
     LLM call produced this plan; here we already have richer per-step outputs,
     so we just project them into the legacy schema instead of doing another
-    LLM round-trip.
+    LLM round-trip. Section order from selection is passed through to LaTeX export.
     """
     matching_skills: list[str] = []
     if compatibility_report:
@@ -602,113 +601,49 @@ def jt_gate_approve_rewrite(state: OrchestratorState) -> Command:
 
 
 # --------------------------------------------------------------------------- #
-# Step 6: assemble CV (merge rewrites + generate_tailored_cv_html)
+# Step 6: assemble tailored CV (merge rewrites into cv_data)
 # --------------------------------------------------------------------------- #
 
 def jt_step6_assemble_cv(state: OrchestratorState) -> dict[str, Any]:
     cv_data = state.get("cv_data") or {}
     rewritten = state.get("rewritten_content") or {}
     merged_cv = _merge_rewrites_into_cv(cv_data, rewritten.get("rewritten_bullets", []) or [])
-    tailoring_plan = _build_tailoring_plan_from_artifacts(
-        state.get("compatibility_report"),
-        state.get("selected_content"),
-        rewritten,
-        state.get("job_data"),
-    )
 
-    html_content = generate_tailored_cv_html.invoke({
-        "cv_json": json.dumps(merged_cv),
-        "tailoring_plan_json": json.dumps(tailoring_plan),
-    })
-
-    narration = (
-        "Assembled the tailored CV. Ready to export - which format would you like?"
-    )
+    narration = "Assembled the tailored CV. Generating PDF export."
     return _narrate(
-        {
-            "cv_data": merged_cv,
-            "tailored_cv_html": html_content if isinstance(html_content, str) else "",
-        },
+        {"cv_data": merged_cv},
         narration,
     )
 
 
 # --------------------------------------------------------------------------- #
-# Gate: choose export format (PDF / DOCX / both)
-# --------------------------------------------------------------------------- #
-
-EXPORT_CHOICES = ["pdf", "docx", "both"]
-
-
-def jt_gate_export_format(state: OrchestratorState) -> Command:
-    payload = GatePayload(
-        step="export_format",
-        kind="choice",
-        narration="Which CV format(s) should I generate?",
-        preview={},
-        allowed_actions=["choose", "reject"],
-        choices=EXPORT_CHOICES,
-    ).model_dump()
-
-    raw = interrupt(payload)
-    resolution = GateResolution.model_validate(raw)
-
-    if resolution.action == "reject":
-        return Command(
-            update=_narrate({"cv_export_choice": None}, "Skipped CV file generation."),
-            goto=JT_GATE_COVER_LETTER,
-        )
-    choice = (resolution.choice or "").lower()
-    if choice not in EXPORT_CHOICES:
-        choice = "pdf"
-    return Command(
-        update={"pending_gate": None, "cv_export_choice": choice},
-        goto=JT_STEP7_GENERATE_CV_FILES,
-    )
-
-
-# --------------------------------------------------------------------------- #
-# Step 7: generate CV files (PDF and/or DOCX)
+# Step 7: generate CV PDF (LaTeX / Harvard template)
 # --------------------------------------------------------------------------- #
 
 def jt_step7_generate_cv_files(state: OrchestratorState) -> dict[str, Any]:
-    """Emit PDF and/or DOCX of the tailored CV based on the upstream choice."""
+    """Emit a tailored CV PDF from merged structured JSON."""
     cv_data = state.get("cv_data") or {}
-    html_content = state.get("tailored_cv_html") or ""
     applicant_name = cv_data.get("name", "Applicant")
     base = _filename_base(cv_data)
-    choice = state.get("cv_export_choice") or "both"
+    selected = state.get("selected_content") or {}
+    section_order = selected.get("section_order") or []
 
     generated: list[dict[str, str]] = list(state.get("generated_files") or [])
     messages: list[str] = []
 
-    if choice in ("pdf", "both") and html_content:
-        pdf_name = f"{base}_cv_tailored.pdf"
-        pdf_msg = generate_cv_pdf.invoke({
-            "html_content": html_content,
-            "output_filename": pdf_name,
-            "applicant_name": applicant_name,
-        })
-        if isinstance(pdf_msg, str) and "Error" not in pdf_msg:
-            filename = _extract_filename(pdf_msg) or pdf_name
-            generated.append(_file_record(filename, "cv"))
-            messages.append(f"PDF: {filename}")
-        else:
-            messages.append(f"PDF generation failed: {pdf_msg}")
-
-    if choice in ("docx", "both"):
-        docx_name = f"{base}_cv_tailored.docx"
-        docx_msg = generate_cv_docx.invoke({
-            "cv_json": json.dumps(cv_data),
-            "output_filename": docx_name,
-            "applicant_name": applicant_name,
-        })
-        if isinstance(docx_msg, str) and "Error" not in docx_msg:
-            filename = _extract_filename(docx_msg) or docx_name
-            generated.append(_file_record(filename, "docx"))
-            messages.append(f"Word: {filename}")
-        else:
-            messages.append(f"Word generation failed: {docx_msg}")
+    pdf_name = f"{base}_cv_tailored.pdf"
+    pdf_msg = generate_cv_pdf.invoke({
+        "cv_json": json.dumps(cv_data),
+        "output_filename": pdf_name,
+        "applicant_name": applicant_name,
+        "section_order_json": json.dumps(section_order),
+    })
+    if isinstance(pdf_msg, str) and "Error" not in pdf_msg:
+        filename = _extract_filename(pdf_msg) or pdf_name
+        generated.append(_file_record(filename, "cv"))
+        messages.append(f"PDF: {filename}")
+    else:
+        messages.append(f"PDF generation failed: {pdf_msg}")
 
     narration = "Generated CV files:\n" + "\n".join(messages) if messages else "No CV files were generated."
     return _narrate({"generated_files": generated}, narration)
@@ -748,6 +683,55 @@ def jt_gate_cover_letter(state: OrchestratorState) -> Command:
         update={
             "pending_gate": None,
             "cover_letter_language": choice,  # type: ignore[typeddict-item]
+        },
+        goto=JT_STEP_SET_COVER_LETTER_RECIPIENT,
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Resolve cover letter recipient (from job posting or user input)
+# --------------------------------------------------------------------------- #
+
+def jt_step_set_cover_letter_recipient(state: OrchestratorState) -> Command:
+    recipient = extract_recipient_name(state.get("job_data"))
+    if recipient:
+        return Command(
+            update=_narrate(
+                {"cover_letter_recipient": recipient},
+                f"Addressing the cover letter to {recipient}.",
+            ),
+            goto=JT_STEP8_COVER_LETTER_CONTENT,
+        )
+    return Command(
+        update={"pending_gate": None},
+        goto=JT_GATE_COVER_LETTER_RECIPIENT,
+    )
+
+
+def jt_gate_cover_letter_recipient(state: OrchestratorState) -> Command:
+    payload = GatePayload(
+        step="cover_letter_recipient",
+        kind="input",
+        narration=(
+            "Who should the cover letter be addressed to? "
+            "Enter the recipient's name (no default is used)."
+        ),
+        preview={},
+        allowed_actions=["edit"],
+    ).model_dump()
+
+    raw = interrupt(payload)
+    resolution = GateResolution.model_validate(raw)
+    recipient = (resolution.feedback or "").strip()
+    if not recipient:
+        return Command(
+            update=_narrate({}, "Please provide the recipient name to continue."),
+            goto=JT_GATE_COVER_LETTER_RECIPIENT,
+        )
+    return Command(
+        update={
+            "pending_gate": None,
+            "cover_letter_recipient": recipient,  # type: ignore[typeddict-item]
         },
         goto=JT_STEP8_COVER_LETTER_CONTENT,
     )
@@ -818,7 +802,7 @@ def jt_gate_approve_cover_letter(state: OrchestratorState) -> Command:
 
 
 # --------------------------------------------------------------------------- #
-# Step 9: cover letter files (PDF/DOCX based on prior export choice)
+# Step 9: cover letter PDF (LaTeX)
 # --------------------------------------------------------------------------- #
 
 def jt_step9_cover_letter_files(state: OrchestratorState) -> dict[str, Any]:
@@ -828,50 +812,33 @@ def jt_step9_cover_letter_files(state: OrchestratorState) -> dict[str, Any]:
     base = _filename_base(cv_data)
     applicant_name = cv_data.get("name", "Applicant")
     applicant_contact = _applicant_contact(cv_data)
-    # Default recipient; the v1 orchestrator does not currently extract one.
-    recipient_info = "Hiring Manager"
-
-    # Match whatever the user picked for the CV export. If the user skipped CV
-    # generation we still default to 'both' here so they get something usable.
-    choice = state.get("cv_export_choice") or "both"
-    if choice not in ("pdf", "docx", "both"):
-        choice = "both"
+    recipient_info = (state.get("cover_letter_recipient") or "").strip()
+    if not recipient_info:
+        return _narrate(
+            {},
+            "Cover-letter export skipped: recipient name is required.",
+        )
 
     suffix = "anschreiben" if language == "german" else "cover_letter"
     generated: list[dict[str, str]] = list(state.get("generated_files") or [])
     messages: list[str] = []
 
-    if choice in ("pdf", "both"):
-        pdf_name = f"{base}_{suffix}.pdf"
-        pdf_msg = generate_cover_letter_pdf.invoke({
-            "content_json": json.dumps(content),
-            "output_filename": pdf_name,
-            "applicant_name": applicant_name,
-            "applicant_contact": applicant_contact,
-            "recipient_info": recipient_info,
-        })
-        if isinstance(pdf_msg, str) and "Error" not in pdf_msg:
-            filename = _extract_filename(pdf_msg) or pdf_name
-            generated.append(_file_record(filename, "cover_letter"))
-            messages.append(f"PDF: {filename}")
-        else:
-            messages.append(f"Cover-letter PDF failed: {pdf_msg}")
-
-    if choice in ("docx", "both"):
-        docx_name = f"{base}_{suffix}.docx"
-        docx_msg = generate_cover_letter_docx.invoke({
-            "content_json": json.dumps(content),
-            "output_filename": docx_name,
-            "applicant_name": applicant_name,
-            "applicant_contact": applicant_contact,
-            "recipient_info": recipient_info,
-        })
-        if isinstance(docx_msg, str) and "Error" not in docx_msg:
-            filename = _extract_filename(docx_msg) or docx_name
-            generated.append(_file_record(filename, "docx"))
-            messages.append(f"Word: {filename}")
-        else:
-            messages.append(f"Cover-letter Word failed: {docx_msg}")
+    pdf_name = f"{base}_{suffix}.pdf"
+    pdf_msg = generate_cover_letter_pdf.invoke({
+        "content_json": json.dumps(content),
+        "output_filename": pdf_name,
+        "applicant_name": applicant_name,
+        "applicant_contact": applicant_contact,
+        "recipient_info": recipient_info,
+        "cv_json": json.dumps(cv_data),
+        "job_json": json.dumps(state.get("job_data") or {}),
+    })
+    if isinstance(pdf_msg, str) and "Error" not in pdf_msg:
+        filename = _extract_filename(pdf_msg) or pdf_name
+        generated.append(_file_record(filename, "cover_letter"))
+        messages.append(f"PDF: {filename}")
+    else:
+        messages.append(f"Cover-letter PDF failed: {pdf_msg}")
 
     narration = (
         "Cover letter exported:\n" + "\n".join(messages)

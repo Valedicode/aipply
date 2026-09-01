@@ -17,7 +17,6 @@ This state holds three classes of data:
    - tailoring_strategy
    - selected_content
    - rewritten_content
-   - tailored_cv_html
    - cover_letter_content
    - cover_letter_language
 
@@ -84,10 +83,9 @@ class OrchestratorState(TypedDict, total=False):
     tailoring_strategy: dict[str, Any] | None
     selected_content: dict[str, Any] | None
     rewritten_content: dict[str, Any] | None
-    tailored_cv_html: str | None
     cover_letter_content: dict[str, Any] | None
     cover_letter_language: CoverLetterLanguage | None
-    cv_export_choice: Literal["pdf", "docx", "both"] | None
+    cover_letter_recipient: str | None
 
     # --- cv-review artifacts -----------------------------------------------
     review_outputs: dict[str, dict[str, Any]]

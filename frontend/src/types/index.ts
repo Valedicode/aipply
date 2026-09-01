@@ -14,6 +14,39 @@ export interface Message {
 // CV Agent Types (matching backend schemas)
 // ============================================
 
+export interface EducationEntry {
+  institution?: string;
+  degree?: string;
+  location?: string;
+  dates?: string;
+  grade?: string;
+  details?: string[];
+}
+
+export interface ExperienceEntry {
+  position?: string;
+  company?: string;
+  location?: string;
+  duration?: string;
+  responsibilities?: string[];
+}
+
+export interface ProjectEntry {
+  name?: string;
+  description?: string;
+  technologies?: string[];
+  outcomes?: string[];
+}
+
+export interface LeadershipEntry {
+  role?: string;
+  organization?: string;
+  location?: string;
+  dates?: string;
+  description?: string;
+  highlights?: string[];
+}
+
 export interface ResumeInfo {
   name: string;
   email: string;
@@ -22,11 +55,12 @@ export interface ResumeInfo {
   github_url?: string;
   linkedin_url?: string;
   portfolio_url?: string;
+  summary?: string;
   skills: string[];
-  education: string[];
-  experience: string[];
-  projects?: string[];
-  leadership_activities?: string[];
+  education: EducationEntry[];
+  experience: ExperienceEntry[];
+  projects?: ProjectEntry[];
+  leadership_activities?: LeadershipEntry[];
 }
 
 export interface CVExtractionResponse {
@@ -63,6 +97,7 @@ export interface JobRequirements {
   responsibilities: string[];
   qualifications: string[];
   key_requirements: string[];
+  recipient_name?: string;
 }
 
 export interface JobExtractionResponse {
@@ -111,7 +146,7 @@ export interface CVJobAlignmentResponse {
 export interface GenerateTailoredCVResponse {
   success: boolean;
   pdf_path?: string;
-  html_preview?: string;
+  latex_preview?: string;
   message: string;
 }
 
@@ -264,7 +299,7 @@ export interface TranslationResponse {
 
 export type OrchestratorFlow = 'job_tailoring' | 'cv_review' | 'discovery';
 
-export type OrchestratorGateKind = 'approval' | 'choice';
+export type OrchestratorGateKind = 'approval' | 'choice' | 'input';
 
 export type OrchestratorGateAction = 'approve' | 'reject' | 'edit' | 'choose';
 

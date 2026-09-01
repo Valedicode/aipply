@@ -62,6 +62,7 @@ Thumbs.db
 output/
 uploads/
 temp/
+data/
 
 # local document
 docs/
